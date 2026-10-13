@@ -3,7 +3,7 @@
 Discrete-event simulation study evaluating bottleneck migration in hybrid wired (IEEE 802.1Q / IEEE 802.1Qbv TSN) and wireless (IEEE 802.11 / Scheduled Wireless) industrial networks for the **Matrix Factory Twin** digital twin architecture.
 
 * **Institution:** Universidade Federal de Santa Catarina (UFSC) — Department of Informatics and Statistics (INE)
-* **Authors:** Breno da Silva Pereira, Gabriel S. Stuart, Lucas de Mello Kindermann
+* **Authors:** Breno da Silva Pereira, Gabriel S. Stuart
 * **Advisor:** Prof. Dr. Antônio Augusto Medeiros Fröhlich
 * **Project Milestone:** P2 — Six-cell comparative evaluation & scheduled wireless spike
 
