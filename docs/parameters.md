@@ -112,9 +112,9 @@ Based on the analytic capacity model ([analysis/capacity.py](../analysis/capacit
 | **Orders** (VDA 5050) | FMS &rarr; AMR | `5051` | `6` | `TC 3` | Highest | `600` B | `exponential(200ms)` | `uniform(0s, 200ms)` | $50\ \text{ms}$ | $50\ \text{ms}$ | Placeholder |
 | **DDS** (Inter-station) | Station &rarr; Station | `5100` | `4` | `TC 2` | High | `200` B | `10ms` *(jitter $\pm 5\%$)* | `uniform(0s, 10ms)` | $5\ \text{ms}$ | $5\ \text{ms}$ | Placeholder |
 | **State** (VDA 5050) | AMR &rarr; FMS | `5050` | `2` | `TC 1` | Medium | `1000` B | `uniform(90ms, 110ms)`| `uniform(0s, 100ms)` | $50\ \text{ms}$ | $50\ \text{ms}$ | Placeholder |
-| **Telemetry** (Sensors) | Station &rarr; FMS | `5200` | `0` | `TC 0` | Background | `1400` B | `exponential(2ms)` *(Point)*<br>`2ms, 600µs, 300µs` *(Sweep)* | `uniform(0s, 2ms)` *(Fix)* | $100\ \text{ms}$ | N/A (excluded) | Placeholder |
+| **Telemetry** (Sensors) | Station &rarr; FMS | `5200` | `0` | `TC 0` | Background | `1400` B | `exponential(${telInterval})`<br>*(Point: 2ms; Sweep: 2ms, 600µs, 300µs)* | `uniform(0s, ${telInterval})` | $100\ \text{ms}$ | N/A (excluded) | Decision |
 
-*Note: Telemetry initial offset was missing in initial INI (causing artificial $t=0$ burst across all 4 stations). Recommended fix: `uniform(0s, 2ms)`.*
+*Note: Telemetry Generator Process: Poisson arrival process (`exponential(interval)`) per station across all configurations (Point and Sweep). Intervals of 2 ms, 600 µs, and 300 µs are per station; across 4 stations transmitting 1400 B frames, aggregate offered load is 22.4 Mbps, 74.7 Mbps, and 149.3 Mbps (matching capacity.md). Initial offset scales dynamically with interval (`uniform(0s, ${telInterval})`), guaranteeing that the 4 stations are desynchronized at $t=0$ across all arrival rates.*
 
 ---
 
