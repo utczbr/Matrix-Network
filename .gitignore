@@ -1,0 +1,32 @@
+# OMNeT++ / INET outputs
+results/*
+!results/.gitkeep
+out/
+*.sca
+*.vec
+*.vci
+*.pcap
+*.pcapng
+
+# Build artifacts
+*.o
+*.so
+*.a
+*.dll
+*.exe
+src/makefrag
+src/Makefile
+
+# Python environment & cache
+.venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE & Editor files
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
