@@ -47,9 +47,9 @@ def check_parameters():
         ("num-rngs", r"num-rngs"),
         ("**.wlan[*].bitrate", r"54\s*Mbps"),
         ("*.amr[*].app[0].source.packetLength", r"1000\s*B"),
-        ("*.fms.app[2..].source.packetLength", r"600\s*B"),
+        ("*.fms.app[3..].source.packetLength", r"600\s*B"),
         ("*.station[*].app[0].source.packetLength", r"200\s*B"),
-        ("*.station[*].app[2].source.packetLength", r"1400\s*B"),
+        ("*.station[*].app[1].source.packetLength", r"1400\s*B"),
         ("**.tsnSwitch.eth[*].macLayer.queue.packetCapacity", r"80"),
     ]
 

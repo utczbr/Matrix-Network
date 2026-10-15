@@ -2,6 +2,8 @@
 
 Prepared by Claude · Oct 12, 2026 · Target: all six backbone/radio cells operational by P2 (Nov 9, 2026)
 
+Updated Oct 14, 2026 for the Q1–Q5 closure (tick semantics, deadlines, lookup interface, UDP, factory scale). Q6–Q8 are still open; see `docs/decisions.md`.
+
 ## How to read this guide
 
 Every step has five parts: **What** to do, **Where**, **How**, **Why** (the purpose) and **Done when** (the exit test that tells you to move on). Tags: **\[V\]** means I verified the point by reading the INET 4.7.0 source; **\[T\]** means it is my best reading and must be tested on your first run. I have not built or run anything, so treat commands as starting points and trust your own error messages over this text. Companion files: `MatrixFactoryNetwork.ned` and `omnetpp.ini` from earlier in this chat.
@@ -33,14 +35,15 @@ The critical path is Phase 7 (scheduled wireless). INET has nothing ready-made f
 - **Where:** Email or the course channel; log answers in `docs/decisions.md`.
 - **Why:** Questions 1-2 define your primary metric, question 3 decides what the simulator must record, and questions 4-5 set the load ranges.
 - **Done when:** Each question has an answer, or (if none by Day 3) a logged assumption. Do not block on replies.
+- **Status (Oct 14, 2026):** (1) Answered: the twin uses a variable-step NER with finest quantum 10 ms, consumption $c = \lceil (g+L)/T \rceil T$, on time iff $a \le c$, no clock stall, State/Telemetry ZOH, Orders/DDS discarded after their TTL. (2) Decided: two-tier deadline framework; the twin's own watchdog constants are still requested. (3) Maintainers aligned with the two-table CSV/JSON lookup, quantile-space PCHIP interpolation and seeded sampling in Java. (4) Decided: open-loop UDP for all classes. (5) Decided: 4 stations, 100 Mbps wired, 802.11g at 54 Mbps, fleet sweep 5, 10, 20, 40, 80 and the same 200 m x 200 m geometry; the twin's exact station/AMR counts are still to be confirmed.
 
 ### Step 0.3 Write the miss definition as formulas
 
-- **What:** Choose one definition. Let g = generation time, a = arrival time at the consumer (infinite if lost), T = tick period, D = class deadline, L = minimum lead time.
+- **What:** Define both metrics and report both (Q1 closed Oct 14): A is the transport baseline, B is the twin-facing metric. Let g = generation time, a = arrival time at the consumer (infinite if lost), T = tick period (primary 10 ms; offline 50 and 500 ms), D = class deadline, L = lead time (working choice L = D).
   - **A, relative deadline:** miss if lost or a - g > D.
-  - **B, tick grid:** consumption instant c = ceil((g + L) / T) x T; miss if lost or a > c.
+  - **B, tick grid:** consumption instant c = ceil((g + L) / T) x T; miss if lost or a > c (confirmed by the maintainers; a = c is on time). After a miss the twin behaves per class: State/Telemetry reuse the previous snapshot (zero-order hold) and consume the late packet at ceil(a / T) x T; Orders/DDS are consumed late until g + TTL and discarded afterwards.
 - **Why:** Definition B depends on where g falls inside a tick, so a delay histogram alone cannot reproduce it: you need (g, a) per packet or an online check (Step 5.3). Choosing now avoids re-running the campaign later.
-- **Done when:** The chosen formula is in `docs/decisions.md`.
+- **Done when:** Both formulas are in `docs/decisions.md` (done: §1.2, §1.3, §1.3.1).
 
 ## Phase 1: Environment (Days 1-2)
 
@@ -172,6 +175,7 @@ The critical path is Phase 7 (scheduled wireless). INET has nothing ready-made f
 - **Stage 1 (pilot scale):** Enable per-packet vectors (the `Debug` add-on). In Python compute g = receive time - lifetime, apply the Step 0.3 definition, and take loss = generated - received.
 - **Stage 2 (campaign scale):** Vectors for hundreds of runs are too large, so write `DeadlineSink` in C++ (`src/`): a subclass of INET's `PassivePacketSink` that counts on-time, late and lost per class and keeps a delay histogram. Plug it in with `*.fms.app[0].sink.typename`; the UDP app's `sink` is replaceable \[V\]. Finish it before the P3 campaign.
 - **Why:** Histograms lose the tick phase that Definition B needs.
+- **Per-class late semantics (Q1):** For State/Telemetry also keep a histogram of the staleness in ticks, max(0, ceil(a/T) - ceil((g+L)/T)). For Orders/DDS count arrivals beyond g + TTL once the maintainers provide the TTL constants. Keep physical drops (`Drop_Queue`, `Drop_Retry`, `Drop_Other`) separate from late arrivals. Compute Definition B for T = 10 ms online and for 50 and 500 ms offline from the stored delay quantiles.
 - **Done when:** Stage 1 reproduces a miss rate you checked by hand on a tiny run.
 
 ### Step 5.4 Choose warm-up and run length
@@ -269,7 +273,7 @@ The critical path is Phase 7 (scheduled wireless). INET has nothing ready-made f
 
 ### Step 9.2 Estimate the campaign cost
 
-- **How:** Runs = cells x fleet levels x load levels x replications; the skeleton's sweep is 6 x 4 x 3 x 10 = 720. Multiply by the measured wall time per run and divide by your cores.
+- **How:** Runs = cells x fleet levels x load levels x replications; the original skeleton sweep is 6 x 4 x 3 x 10 = 720. With the Q5 fleet levels (5, 10, 20, 40, 80), 8 to 10 telemetry levels and 1 to 2 PHY rates it is 6 x 5 x (8 to 10) x 10 x (1 to 2) = 2,400 to 6,000. Multiply by the measured wall time per run (N = 80 runs are the slowest) and divide by your cores.
 - **Why:** It must fit the P3 window (Nov 9-23).
 
 ### Step 9.3 Choose the number of replications
@@ -281,6 +285,12 @@ The critical path is Phase 7 (scheduled wireless). INET has nothing ready-made f
 
 - **How:** Choose load and fleet levels that bracket both knees; write them to `docs/p3-grid.md`.
 - **Done when:** The grid and its estimated cost are written down.
+
+### Step 9.5 Prepare the lookup-table export (Q3)
+
+- **How:** Write `analysis/export_lookup.py` so that it produces `lookup_summary` and `lookup_ecdf` (tidy CSV with JSON mirror). Use the 15 fixed quantile levels (0, 0.01, 0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95, 0.97, 0.98, 0.99, 0.995, 0.999, 1.0) over delivered packets, keep `p_loss` separate, and add `phy_rate_Mbps`, `insufficient_tail_samples` and `schema_version`. Interpolate in quantile space with monotone PCHIP along fleet size and telemetry load, enforce non-crossing across levels, clamp at the grid edge with a warning and never extrapolate. Send a 1-cell, 1-N, 1-lambda sample to the maintainers for their ingestion test.
+- **Why:** The Java twin samples delays by seeded inverse transform, so it needs the full quantile function and the loss probability, and it must stay deterministic under its replay tests.
+- **Done when:** The maintainers' automated test ingests the sample without schema errors.
 
 ## Phase 10: P2 hand-off checklist
 

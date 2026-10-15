@@ -1,14 +1,19 @@
-# OMNeT++ / INET outputs
+# OMNeT++ / INET simulation outputs
 results/*
 !results/.gitkeep
+simulations/results/*
+!simulations/results/.gitkeep
 out/
 *.sca
 *.vec
 *.vci
 *.pcap
 *.pcapng
+*.elog
+*.qtenv
+.oppbuildstatus
 
-# Build artifacts
+# C++ Build artifacts
 *.o
 *.so
 *.a
@@ -17,12 +22,17 @@ out/
 src/makefrag
 src/Makefile
 
-# Python environment & cache
+# Python environment, tests & cache
 .venv/
 env/
 __pycache__/
 *.py[cod]
 *$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+*.log
 
 # IDE & Editor files
 .vscode/
@@ -30,3 +40,8 @@ __pycache__/
 *.swp
 *~
 .DS_Store
+
+# Local machine environment overrides (uncommitted)
+analysis/local_config.py
+Makefile.local
+.env

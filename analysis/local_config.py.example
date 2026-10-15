@@ -1,0 +1,8 @@
+# Example local configuration override for Matrix Factory Twin
+# Copy this file to 'analysis/local_config.py' if you have non-standard installation paths.
+# 'local_config.py' is ignored by git and will never be committed.
+
+# OMNETPP_ROOT = "/opt/omnetpp-6.4.0"
+# INET_ROOT = "/opt/omnetpp-6.4.0/samples/inet-4.7.0"
+# OMNETPP_ENV = "/opt/omnetpp-6.4.0/setenv"
+# PROJECT_ROOT = "/custom/path/to/Matrix"
