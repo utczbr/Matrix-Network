@@ -1,8 +1,7 @@
 //
-// Matrix Factory Twin - hybrid wired/wireless network (P2 skeleton)
+// Matrix Factory Twin - hybrid wired/wireless experiment network
 //
-// Written against INET 4.6.0 (module names/params checked by reading the
-// source, NOT yet compiled or run). Requires OMNeT++ 6.2+.
+// Targets OMNeT++ 6.4.0 and INET 4.7.0.
 //
 // Topology (single star, one TSN switch):
 //
@@ -30,14 +29,19 @@ import inet.node.tsn.TsnDevice;
 import inet.node.tsn.TsnSwitch;
 import inet.node.wireless.AccessPoint;
 import inet.physicallayer.wireless.ieee80211.packetlevel.Ieee80211ScalarRadioMedium;
+import ExperimentCoordinator;
 
 network MatrixFactoryNetwork extends TsnNetworkBase
 {
     parameters:
         int numAmrs = default(10);
         int numStations = default(4);
+        double wirelessPhyRate @unit(bps) = default(54Mbps); // single source for PHY and schedule geometry
         *.eth[*].bitrate = default(100Mbps);   // wired rate: calibrate in the pilot
     submodules:
+        experimentCoordinator: ExperimentCoordinator {
+            @display("p=100,30");
+        }
         radioMedium: Ieee80211ScalarRadioMedium {
             @display("p=100,500;is=s");
         }

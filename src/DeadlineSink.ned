@@ -17,7 +17,5 @@ simple DeadlineSink extends PassivePacketSink
         bool isZohFlow = default(true);                       // true for state/telemetry (ZOH); false for orders/dds (KILL)
         double warmupTime @unit(s) = default(5s);             // Warmup filter cutoff (g < warmupTime)
         double simTimeLimit @unit(s) = default(60s);          // Unbiased horizon filter cutoff (c > simTimeLimit)
-        bool randomizeTickPhase = default(true);              // true for campaign (phi ~ U(0, T)); false for fixed unit tests
-        double fixedTickPhase @unit(s) = default(0s);         // Used when randomizeTickPhase == false
-        int phaseRngIndex = default(1);                       // Uses rng-1 for replication phase draw
+        // Tick phases are drawn once per replication by the network-level ExperimentCoordinator.
 }

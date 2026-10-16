@@ -45,6 +45,8 @@ def check_parameters():
         ("sim-time-limit", r"sim-time-limit"),
         ("warmup-period", r"warmup-period"),
         ("num-rngs", r"num-rngs"),
+        ("repeat", r"Replication Count.*22"),
+        ("*.wirelessPhyRate", r"wirelessPhyRate"),
         ("**.wlan[*].bitrate", r"54\s*Mbps"),
         ("*.amr[*].app[0].source.packetLength", r"1000\s*B"),
         ("*.fms.app[3..].source.packetLength", r"600\s*B"),
@@ -66,6 +68,8 @@ def check_parameters():
         print("[✓] Consistency check passed: all checked baseline parameters are documented in docs/parameters.md.")
     else:
         print("[!] Some parameter mismatches or missing entries detected.")
+        return False
+    return True
 
 if __name__ == "__main__":
-    check_parameters()
+    sys.exit(0 if check_parameters() else 1)

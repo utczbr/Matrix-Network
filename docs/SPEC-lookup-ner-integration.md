@@ -1,7 +1,7 @@
 # Implementation Specification: Lookup Table & NER Integration (Checklist C3 & Java Twin Contract)
 
 **Document Reference:** `docs/SPEC-lookup-ner-integration.md`  
-**Target Tooling & Interface:** `analysis/export_lookup.py`, `lookup_summary.csv`/`.json`, `lookup_ecdf.csv`/`.json`  
+**Target Tooling & Interface:** `analysis/export_lookup.py`, `lookup_summary`, `lookup_ecdf`, and `lookup_replications`
 **Target Twin Engine:** Java / JaCaMo (`MainSimulator.java`, `AMRArtifact.java`, `BaseStationArtifact.java`, `TimerArtifact.java`)  
 **Revision:** Oct 14, 2026 (Locked Specification)
 
@@ -16,21 +16,32 @@
 ### 1.2 Packet Conservation Audit (Mandatory Quality Gate)
 For every `(cell, class, N_AMR, lambda_tel_Mbps, phy_rate_Mbps, repetition)` tuple, assert:
 
-$$n_{\text{valid}} == n_{\text{delivered}} + n_{\text{Drop\_Queue}} + n_{\text{Drop\_Retry}} + n_{\text{Drop\_Other}}$$
+$$n_{\text{generated,valid}} = n_{\text{delivered}} + n_{\text{Drop\_Queue}} + n_{\text{Drop\_Retry}} + n_{\text{Drop\_Other}} + n_{\text{Late\_Termination}}$$
 
 If any packet is unaccounted for ($|n_{\text{valid}} - \sum n_{\text{outcomes}}| > 0$), the exporter raises a fatal runtime exception and halts pipeline processing.
 
+Missing scalars are fatal and are never interpreted as zero. The production
+export also requires the complete locked factorial grid, repetitions 0 through
+21 exactly once per key, coordinator/sink delivery equality, complete domain
+timing, and identical tick phases across every sink in a replication.
+
+`p_loss` includes the three physical drop bins only. `Late_Termination` is a
+deadline miss but not a physical loss.
+
 ### 1.3 Replication-Level Statistical Aggregation (`docs/decisions.md` §1.6)
-* **Sample Mean & Student-$t$ Interval:** For each metric (including continuous `miss_A_1ms`..`100ms` and discrete `miss_B_1ms`..`100ms` at $T \in \{10, 50, 500\}\text{ ms}$), compute the sample mean across the $R = 10$ replications and 95% confidence interval half-width:
+* **Sample Mean & Student-$t$ Interval:** For each metric, compute the sample mean across the $R = 22$ replications and 95% confidence interval half-width:
   $$\bar{p} = \frac{1}{R}\sum_{r=1}^R \hat{p}_r, \qquad H = t_{0.975, R-1} \cdot \frac{s}{\sqrt{R}}$$
 * **Boundary Case Handling (Wilson Score):** When all replications yield zero misses ($\sum k_r = 0$), report the upper bound via the 95% Wilson score interval:
   $$p_{\text{upper}} = \frac{3.8416}{n_{\text{pooled}} + 3.8416}$$
 * **Tail Sample Sizing Flags:**
   * `flag_p99 = "OK"` iff $n_{\text{pooled}} \ge 10^4$ (else `"INSUFFICIENT_TAIL_SAMPLES"`).
   * `flag_p99_9 = "OK"` iff $n_{\text{pooled}} \ge 10^5$ (else `"INSUFFICIENT_TAIL_SAMPLES"`).
+* **Paired effects:** `lookup_replications.csv` retains per-seed nominal miss
+  rates. `analysis/bottleneck_migration.py` pairs all six cells on seed and
+  reports wireless and wired contrasts with Student-$t$ half-widths.
 
 ### 1.4 Wasserstein Quantile Table & Monotone PCHIP Grid (`lookup_ecdf.csv` / `.json`)
-* **24 Locked Quantile Levels:** Extract conditional delivery latency quantiles ($a < \infty$):
+* **25 Locked Quantile Levels:** Extract conditional delivery latency quantiles ($a < \infty$):
   $$q \in \{0.0, 0.01, 0.02, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50, 0.60, 0.70, 0.75, 0.80, 0.85, 0.90, 0.92, 0.95, 0.97, 0.98, 0.99, 0.995, 0.999, 1.0\}$$
 * **1D Wasserstein Geodesic Interpolation:** For each quantile level $q$, interpolate latency across continuous dimensions $N_{\text{AMR}}$ and $\lambda_{\text{tel}}$ using Monotone PCHIP (`scipy.interpolate.PchipInterpolator`), preventing overshoot at the FIFO saturation knee.
 * **Non-Crossing & Clamping Guard:** Enforce monotonicity across quantiles ($Q(q_{k+1}) \ge Q(q_k)$), clip delays to $\ge 0$, and apply nearest-neighbor clamping for post-saturation and out-of-grid requests.
@@ -54,7 +65,7 @@ For each message sent at simulated time $g = \text{currentSimTime}$:
      * For `orders` and `dds`: `TimerArtifact.evaluateTTLs()` will expire at $c_{\text{TTL}}$ and abort transaction.
      * For `state` and `telemetry`: `assembleTelemetryFrame()` maintains the prior snapshot (Zero-Order Hold).
 3. **Step 2 — Quantile Inversion for Delivered Frames:**
-   * If $u_{\text{loss}} \ge p_{\text{loss}}$, find the bracketing quantile levels $q_k \le u_{\text{lat}} \le q_{k+1}$ in the 24-point array.
+   * If $u_{\text{loss}} \ge p_{\text{loss}}$, find the bracketing quantile levels $q_k \le u_{\text{lat}} \le q_{k+1}$ in the 25-point array.
    * Compute transport latency $\tau$ via linear quantile interpolation:
      $$\tau = Q(q_k) + \frac{u_{\text{lat}} - q_k}{q_{k+1} - q_k} \cdot \big(Q(q_{k+1}) - Q(q_k)\big)$$
 4. **Step 3 — NER Registration:**

@@ -11,11 +11,9 @@ TARGET_NAME = $(LIB_PREFIX)matrixfactory$(D)
 TARGET = $(TARGET_NAME)$(SHARED_LIB_SUFFIX)
 TARGET_FILES = $(TARGET_DIR)/$(TARGET)
 
-# Optional local overrides (git-ignored)
--include Makefile.local
-
-# Default INET location relative to user home directory if not set in environment
-INET_ROOT ?= $(HOME)/omnetpp-6.4.0/samples/inet-4.7.0
+# Prefer a colocated opp_env workspace, then fall back to the canonical home install.
+WORKSPACE_INET_ROOT := $(abspath ../../inet-workspace/inet-4.7.0)
+INET_ROOT ?= $(if $(wildcard $(WORKSPACE_INET_ROOT)/src),$(WORKSPACE_INET_ROOT),$(HOME)/omnetpp-6.4.0/samples/inet-4.7.0)
 
 # C++ include paths (with -I)
 INCLUDE_PATH = -I$(INET_ROOT)/src
@@ -32,10 +30,10 @@ PROJECTRELATIVE_PATH =
 O = $(PROJECT_OUTPUT_DIR)/$(CONFIGNAME)/$(PROJECTRELATIVE_PATH)
 
 # Object files for local .cc, .msg and .sm files
-OBJS = $O/src/DeadlineSink.o $O/src/ScheduledDcf.o
+OBJS = $O/src/DeadlineSink.o $O/src/ExperimentCoordinator.o $O/src/ExperimentPacketTag_m.o $O/src/ScheduledDcf.o
 
 # Message files
-MSGFILES =
+MSGFILES = src/ExperimentPacketTag.msg
 
 # SM files
 SMFILES =
@@ -55,6 +53,40 @@ $(error Config file '$(CONFIGFILE)' does not exist -- add the OMNeT++ bin direct
 endif
 
 include $(CONFIGFILE)
+
+# Optional local overrides (git-ignored). This must follow Makefile.inc so
+# compiler and linker settings can actually override installation defaults.
+-include Makefile.local
+
+# Some OMNeT++ packages configure ccache as an optional compiler launcher even
+# when it is not installed on the host. Fall back to the underlying compiler.
+ifeq ($(firstword $(CXX)),ccache)
+ifeq ($(shell command -v ccache 2>/dev/null),)
+CXX := $(wordlist 2,$(words $(CXX)),$(CXX))
+endif
+endif
+ifeq ($(firstword $(CC)),ccache)
+ifeq ($(shell command -v ccache 2>/dev/null),)
+CC := $(wordlist 2,$(words $(CC)),$(CC))
+endif
+endif
+
+# Nix-provided OMNeT++ configurations may name libpython without adding its
+# store directory to the linker search path. Derive that directory from the
+# matching Python include flag already supplied by Makefile.inc.
+PYTHON_EMBED_INCLUDE := $(patsubst -I%,%,$(firstword $(filter -I%,$(PYTHON_EMBED_CFLAGS))))
+ifneq ($(PYTHON_EMBED_INCLUDE),)
+PYTHON_EMBED_PREFIX := $(abspath $(PYTHON_EMBED_INCLUDE)/../..)
+ifneq ($(wildcard $(PYTHON_EMBED_PREFIX)/lib),)
+LDFLAGS += $(LDFLAG_LIBPATH)$(PYTHON_EMBED_PREFIX)/lib
+endif
+endif
+
+# If the configured clang cannot locate ld.lld, use its default system linker.
+LLD_PROGRAM := $(shell $(firstword $(SHLIB_LD)) -print-prog-name=ld.lld 2>/dev/null)
+ifeq ($(shell command -v $(LLD_PROGRAM) 2>/dev/null),)
+LDFLAGS := $(filter-out -fuse-ld=lld,$(LDFLAGS))
+endif
 
 # Simulation kernel and user interface libraries
 OMNETPP_LIBS = -loppenvir$D $(KERNEL_LIBS) $(SYS_LIBS)

@@ -26,16 +26,18 @@ void ScheduledDcf::initialize(int stage)
     Dcf::initialize(stage);
 
     if (stage == INITSTAGE_LOCAL) {
-        slotIndex = par("slotIndex");
-        slotStride = std::max(1, (int)par("slotStride"));
         numAssignedSlots = std::max(1, (int)par("numAssignedSlots"));
+        slotStartOffset = par("slotStartOffset");
+        slotStrideTime = par("slotStrideTime");
         slotDuration = par("slotDuration");
         superframeDuration = par("superframeDuration");
         cyclePhaseOffset = par("cyclePhaseOffset");
         requiredExchangeTime = par("requiredExchangeTime");
 
-        if (slotDuration <= SIMTIME_ZERO || superframeDuration <= SIMTIME_ZERO)
-            throw cRuntimeError("ScheduledDcf: slotDuration and superframeDuration must be strictly positive.");
+        if (slotDuration <= SIMTIME_ZERO || slotStrideTime <= SIMTIME_ZERO || superframeDuration <= SIMTIME_ZERO)
+            throw cRuntimeError("ScheduledDcf: slotDuration, slotStrideTime, and superframeDuration must be strictly positive.");
+        if (slotStartOffset < SIMTIME_ZERO || slotStartOffset + (numAssignedSlots - 1) * slotStrideTime + slotDuration > superframeDuration)
+            throw cRuntimeError("ScheduledDcf: assigned slot range does not fit in the superframe.");
         if (requiredExchangeTime > slotDuration)
             throw cRuntimeError("ScheduledDcf: requiredExchangeTime (%s) exceeds slotDuration (%s).",
                     requiredExchangeTime.ustr().c_str(), slotDuration.ustr().c_str());
@@ -44,7 +46,8 @@ void ScheduledDcf::initialize(int stage)
 
         WATCH(numSlotDeferrals);
         WATCH(numGrantedInSlot);
-        EV_INFO << "ScheduledDcf " << getFullPath() << " slotIndex=" << slotIndex << " superframe=" << superframeDuration << " slotDur=" << slotDuration << endl;
+        EV_INFO << "ScheduledDcf " << getFullPath() << " slotStartOffset=" << slotStartOffset
+                << " superframe=" << superframeDuration << " slotDur=" << slotDuration << endl;
     }
     else if (stage == INITSTAGE_LINK_LAYER) {
         // Note: cwMin = 0 and cwMax = 0 must also be set in omnetpp.ini via
@@ -56,7 +59,9 @@ void ScheduledDcf::initialize(int stage)
 bool ScheduledDcf::isWithinActiveSlot(simtime_t now) const
 {
     const int64_t superRaw = superframeDuration.raw();
-    const int64_t slotSecRaw = slotDuration.raw();
+    const int64_t slotDurationRaw = slotDuration.raw();
+    const int64_t slotStartOffsetRaw = slotStartOffset.raw();
+    const int64_t slotStrideRaw = slotStrideTime.raw();
     const int64_t reqSecRaw = requiredExchangeTime.raw();
     const int64_t offsetRaw = cyclePhaseOffset.raw();
 
@@ -65,9 +70,8 @@ bool ScheduledDcf::isWithinActiveSlot(simtime_t now) const
         deltaRaw += superRaw;
 
     for (int m = 0; m < numAssignedSlots; ++m) {
-        int sIdx = slotIndex + m * slotStride;
-        int64_t slotStartRaw = sIdx * slotSecRaw;
-        int64_t slotEndRaw = (sIdx + 1) * slotSecRaw;
+        int64_t slotStartRaw = slotStartOffsetRaw + m * slotStrideRaw;
+        int64_t slotEndRaw = slotStartRaw + slotDurationRaw;
 
         if (deltaRaw >= slotStartRaw && (slotEndRaw - deltaRaw) >= reqSecRaw) {
             return true;
@@ -79,7 +83,8 @@ bool ScheduledDcf::isWithinActiveSlot(simtime_t now) const
 simtime_t ScheduledDcf::computeNextSlotStart(simtime_t now) const
 {
     const int64_t superRaw = superframeDuration.raw();
-    const int64_t slotSecRaw = slotDuration.raw();
+    const int64_t slotStartOffsetRaw = slotStartOffset.raw();
+    const int64_t slotStrideRaw = slotStrideTime.raw();
     const int64_t offsetRaw = cyclePhaseOffset.raw();
     const int64_t nowRaw = now.raw();
 
@@ -94,8 +99,7 @@ simtime_t ScheduledDcf::computeNextSlotStart(simtime_t now) const
     for (int cycleDelta = 0; cycleDelta <= 2; ++cycleDelta) {
         int64_t baseRaw = cycleBaseRaw + cycleDelta * superRaw;
         for (int m = 0; m < numAssignedSlots; ++m) {
-            int sIdx = slotIndex + m * slotStride;
-            int64_t candidateStartRaw = baseRaw + sIdx * slotSecRaw;
+            int64_t candidateStartRaw = baseRaw + slotStartOffsetRaw + m * slotStrideRaw;
             if (candidateStartRaw > nowRaw) {
                 if (bestNextRaw == -1 || candidateStartRaw < bestNextRaw)
                     bestNextRaw = candidateStartRaw;
@@ -106,8 +110,8 @@ simtime_t ScheduledDcf::computeNextSlotStart(simtime_t now) const
     }
 
     if (bestNextRaw == -1) {
-        throw cRuntimeError("ScheduledDcf: computeNextSlotStart failed: now=%s, k=%ld, cycleBase=%ld, slotIndex=%d",
-            now.str().c_str(), (long)k, (long)cycleBaseRaw, slotIndex);
+        throw cRuntimeError("ScheduledDcf: computeNextSlotStart failed: now=%s, k=%ld, cycleBase=%ld, slotStartOffset=%s",
+            now.str().c_str(), (long)k, (long)cycleBaseRaw, slotStartOffset.str().c_str());
     }
 
     return SimTime::fromRaw(bestNextRaw);

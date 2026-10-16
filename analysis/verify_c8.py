@@ -16,8 +16,14 @@ from pathlib import Path
 
 # Ensure analysis directory is on sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from env_config import OMNETPP_ENV_STR as OMNETPP_ENV, INET_ROOT_STR as INET_ROOT, PROJECT_ROOT_STR as PROJECT_ROOT, SIM_DIR_STR as SIM_DIR
-RES_DIR = os.path.join(SIM_DIR, "results")
+from env_config import (
+    OMNETPP_ENV_STR as OMNETPP_ENV,
+    INET_ROOT_STR as INET_ROOT,
+    MATRIXFACTORY_LIB_STR as MATRIXFACTORY_LIB,
+    PROJECT_ROOT_STR as PROJECT_ROOT,
+    SIM_DIR_STR as SIM_DIR,
+)
+RES_DIR = os.path.join(SIM_DIR, "results", "verify_c8")
 
 def run_simulation(config, sim_time="10s", extra_args=""):
     os.makedirs(RES_DIR, exist_ok=True)
@@ -26,11 +32,11 @@ def run_simulation(config, sim_time="10s", extra_args=""):
         f"export INET_ROOT={INET_ROOT} && "
         f"cd {SIM_DIR} && "
         f"opp_run -n $INET_ROOT/src:../src:. "
-        f"-l $INET_ROOT/src/INET -l ../out/gcc-release/matrixfactory "
-        f"-c {config} -u Cmdenv "
-        f"'--sim-time-limit={sim_time}' "
-        f"{extra_args} "
-        f"omnetpp.ini"
+        f"-l $INET_ROOT/src/INET -l {MATRIXFACTORY_LIB} "
+        f"-c {config} -u Cmdenv omnetpp.ini "
+        f"'--sim-time-limit={sim_time}' '--**.simTimeLimit={sim_time}' "
+        f"'--result-dir={RES_DIR}' "
+        f"{extra_args}"
     )
     res = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True)
     if res.returncode != 0:
@@ -41,7 +47,7 @@ def extract_pars(sca_path):
     pars = {}
     with open(sca_path, "r") as f:
         for line in f:
-            if line.startswith("par "):
+            if line.startswith("par ") or line.startswith("param "):
                 parts = line.strip().split()
                 if len(parts) >= 4:
                     key = f"{parts[1]}.{parts[2]}"
@@ -64,23 +70,52 @@ def extract_scalars(sca_path):
                         pass
     return scalars
 
+def required(scalars, key):
+    if key not in scalars:
+        raise RuntimeError(f"required scalar {key!r} is absent")
+    return scalars[key]
+
+def extract_vectors(vec_path):
+    """Return {(module, vector_name): [(time, value), ...]}."""
+    headers = {}
+    vectors = {}
+    with open(vec_path, "r", encoding="utf-8") as stream:
+        for line in stream:
+            parts = line.strip().split()
+            if len(parts) >= 4 and parts[0] == "vector":
+                headers[parts[1]] = (parts[2], parts[3].strip('"'))
+                vectors[headers[parts[1]]] = []
+            elif parts and parts[0] in headers:
+                # TV or ETV vector columns; time/value are always the last two.
+                vectors[headers[parts[0]]].append((float(parts[-2]), float(parts[-1])))
+    return vectors
+
 def main():
     print("=================================================================")
     print("  Checklist C8: Execution Rigor & Validation Suite")
     print("=================================================================\n")
 
-    # Clean results directory before test
-    for f in os.listdir(RES_DIR):
-        os.remove(os.path.join(RES_DIR, f))
+    reuse_results = os.environ.get("VERIFY_C8_REUSE") == "1"
+
+    # Clean only this script's dedicated result directory.
+    os.makedirs(RES_DIR, exist_ok=True)
+    if not reuse_results:
+        for f in os.listdir(RES_DIR):
+            path = os.path.join(RES_DIR, f)
+            if os.path.isfile(path):
+                os.remove(path)
 
     # 1. Run Cell 1 (CSMA, FIFO), Cell 2 (Sched, FIFO), Cell 3 (CSMA, Prio), Cell 5 (CSMA, TAS)
     cells = ["Cell1", "Cell2", "Cell3", "Cell5"]
-    for c in cells:
-        print(f"[*] Running {c} for 10s (repetition 0)...")
-        extra = ""
-        if c == "Cell5":
-            extra = "'--**.gateState:vector.vector-recording=true' '--**.vector-recording=true'"
-        run_simulation(c, sim_time="10s", extra_args=extra)
+    if reuse_results:
+        print(f"[*] Reusing existing results from {RES_DIR}")
+    else:
+        for c in cells:
+            print(f"[*] Running {c} for 10s (repetition 0)...")
+            extra = "'--**.generationEvents:vector(packetBytes).vector-recording=true'"
+            if c == "Cell5":
+                extra += " '--**.gateState:vector.vector-recording=true'"
+            run_simulation(c, sim_time="10s", extra_args=extra)
 
     # Map files
     sca_files = {}
@@ -103,7 +138,7 @@ def main():
         y_key = f"MatrixFactoryNetwork.amr[{i}].mobility.initialY"
         x1, x2 = pars_c1.get(x_key), pars_c2.get(x_key)
         y1, y2 = pars_c1.get(y_key), pars_c2.get(y_key)
-        if x1 != x2 or y1 != y2:
+        if x1 is None or y1 is None or x2 is None or y2 is None or x1 != x2 or y1 != y2:
             spatial_match = False
             print(f"  [!] Mismatch on AMR {i}: C1=({x1}, {y1}) vs C2=({x2}, {y2})")
 
@@ -134,9 +169,9 @@ def main():
     ]
 
     for label, metric in sources:
-        v1 = sc_c1.get(metric, 0)
-        v3 = sc_c3.get(metric, 0)
-        v5 = sc_c5.get(metric, 0)
+        v1 = required(sc_c1, metric)
+        v3 = required(sc_c3, metric)
+        v5 = required(sc_c5, metric)
         if not (v1 == v3 == v5 and v1 > 0):
             load_parity = False
             print(f"  [!] Parity violation for {label}: C1={v1}, C3={v3}, C5={v5}")
@@ -148,6 +183,28 @@ def main():
     else:
         print("  [✗] FAILED: Offered load diverged across cells.")
         sys.exit(1)
+
+    vec_files = {}
+    for filename in os.listdir(RES_DIR):
+        for cell in ("Cell1", "Cell3", "Cell5"):
+            if filename.startswith(cell + "-") and filename.endswith(".vec"):
+                vec_files[cell] = os.path.join(RES_DIR, filename)
+    if set(vec_files) != {"Cell1", "Cell3", "Cell5"}:
+        raise RuntimeError(f"missing offered-load vectors: found {sorted(vec_files)}")
+    generated = {cell: extract_vectors(path) for cell, path in vec_files.items()}
+    source_keys = sorted(key for key in generated["Cell1"]
+                         if ".source" in key[0] and key[1].startswith("generationEvents:vector"))
+    if not source_keys:
+        raise RuntimeError("no source generationEvents:vector series were recorded")
+    for key in source_keys:
+        reference = [t for t, _ in generated["Cell1"][key]][:1000]
+        if not reference:
+            raise RuntimeError(f"empty generation vector {key}")
+        for cell in ("Cell3", "Cell5"):
+            candidate = [t for t, _ in generated[cell].get(key, [])][:1000]
+            if candidate != reference:
+                raise RuntimeError(f"generation timestamps differ for {key[0]} between Cell1 and {cell}")
+    print(f"  [✓] First up to 1,000 generation timestamps match exactly for all {len(source_keys)} sources.")
 
     # -------------------------------------------------------------------------
     # Test 3: Packet Conservation in DeadlineSink
@@ -161,12 +218,12 @@ def main():
     ]
 
     for label, prefix in sinks:
-        n_total = sc_c1.get(f"{prefix} n_received_total", 0)
-        n_warmup = sc_c1.get(f"{prefix} n_filtered_warmup", 0)
-        n_horizon = sc_c1.get(f"{prefix} n_filtered_horizon", 0)
-        n_valid = sc_c1.get(f"{prefix} n_valid_delivered", 0)
-        n_ontime_A = sc_c1.get(f"{prefix} n_on_time_nominal_A", 0)
-        n_late_A = sc_c1.get(f"{prefix} n_late_nominal_A", 0)
+        n_total = required(sc_c1, f"{prefix} n_received_total")
+        n_warmup = required(sc_c1, f"{prefix} n_filtered_warmup")
+        n_horizon = required(sc_c1, f"{prefix} n_filtered_horizon")
+        n_valid = required(sc_c1, f"{prefix} n_valid_delivered")
+        n_ontime_A = required(sc_c1, f"{prefix} n_on_time_nominal_A")
+        n_late_A = required(sc_c1, f"{prefix} n_late_nominal_A")
 
         # Invariant 1: n_total == n_warmup + n_horizon + n_valid
         if n_total != (n_warmup + n_horizon + n_valid):
@@ -186,6 +243,15 @@ def main():
         print("  [✗] FAILED: Conservation invariant broken.")
         sys.exit(1)
 
+    coordinator = "MatrixFactoryNetwork.experimentCoordinator"
+    for cls in ("orders", "dds", "state", "telemetry"):
+        generated_count = required(sc_c1, f"{coordinator} n_generated_valid_{cls}")
+        outcomes = sum(required(sc_c1, f"{coordinator} {name}_{cls}") for name in
+                       ("n_delivered_valid", "n_drop_queue", "n_drop_retry", "n_drop_other", "n_late_termination"))
+        if generated_count != outcomes:
+            raise RuntimeError(f"full conservation failed for {cls}: generated={generated_count}, outcomes={outcomes}")
+        print(f"  [✓] {cls:<10}: generated valid {int(generated_count)} = all terminal outcomes {int(outcomes)}")
+
     # -------------------------------------------------------------------------
     # Test 4: GCL Gate State Vector Inspection in Cell 5 (TAS)
     # -------------------------------------------------------------------------
@@ -197,20 +263,34 @@ def main():
             vec_c5 = os.path.join(RES_DIR, f)
             break
 
-    if vec_c5:
-        # Check vector file has entries for transmissionGate
-        gate_vectors_found = False
-        with open(vec_c5, "r") as f:
-            for line in f:
-                if "transmissionGate" in line and "gateState:vector" in line:
-                    gate_vectors_found = True
-                    break
-        if gate_vectors_found:
-            print(f"  [✓] PASSED: GCL transmissionGate gateState:vectors actively recorded in Cell 5.")
-        else:
-            print("  [!] Warning: gateState:vector not found in .vec headers.")
-    else:
-        print("  [!] Warning: Cell 5 .vec file not found.")
+    if not vec_c5:
+        raise RuntimeError("Cell 5 .vec file is absent")
+    vectors = extract_vectors(vec_c5)
+    expected = {3: (0.0, 100e-6), 2: (100e-6, 300e-6),
+                1: (300e-6, 500e-6), 0: (500e-6, 0.0)}
+    checked = 0
+    for gate, boundaries in expected.items():
+        series = [(key, data) for key, data in vectors.items()
+                  if f"transmissionGate[{gate}]" in key[0] and key[1] == "gateState:vector"]
+        if not series:
+            raise RuntimeError(f"gateState:vector absent for traffic class gate {gate}")
+        for key, data in series:
+            # Vector recording starts after the configured 5 s warm-up. GCL
+            # validation is phase-relative, so absolute recording time is irrelevant.
+            times = [time for time, _ in data][:20]
+            if not times:
+                raise RuntimeError(f"gate vector {key} has no runtime transitions")
+            phases = [time % 1e-3 for time in times]
+            for phase in phases:
+                if not any(min(abs(phase - b), abs(phase - b + 1e-3), abs(phase - b - 1e-3)) < 1e-10
+                           for b in boundaries):
+                    raise RuntimeError(f"unexpected GCL transition phase {phase}s in {key}")
+            for boundary in boundaries:
+                if not any(min(abs(phase - boundary), abs(phase - boundary + 1e-3), abs(phase - boundary - 1e-3)) < 1e-10
+                           for phase in phases):
+                    raise RuntimeError(f"missing GCL boundary {boundary}s in {key}")
+            checked += 1
+    print(f"  [✓] PASSED: {checked} gate vectors transition only at the four configured GCL boundaries.")
 
     print("\n=================================================================")
     print("  ALL CHECKLIST C8 VERIFICATIONS PASSED SUCCESSFULLY!")

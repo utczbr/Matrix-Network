@@ -16,9 +16,9 @@ class INET_API ScheduledDcf : public Dcf
 {
   protected:
     // TDMA superframe & slot configuration parameters
-    int slotIndex = 0;
-    int slotStride = 1;
     int numAssignedSlots = 1;
+    simtime_t slotStartOffset = SIMTIME_ZERO;
+    simtime_t slotStrideTime = SIMTIME_ZERO;
     simtime_t slotDuration = SIMTIME_ZERO;
     simtime_t superframeDuration = SIMTIME_ZERO;
     simtime_t cyclePhaseOffset = SIMTIME_ZERO;

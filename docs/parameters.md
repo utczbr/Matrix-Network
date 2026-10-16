@@ -2,7 +2,7 @@
 
 This sheet catalogs every parameter in the simulation model ([simulations/omnetpp.ini](../simulations/omnetpp.ini) and [simulations/MatrixFactoryNetwork.ned](../simulations/MatrixFactoryNetwork.ned)).
 
-**Revision:** Oct 14, 2026. All eight architectural and experimental questions (Q1–Q8) are now formally locked (see [decisions.md](decisions.md) §2).
+**Revision:** Oct 15, 2026. Configuration is synchronized with the campaign-readiness repair; C8 and scheduled-access acceptance pass, while the repaired pilot remains pending.
 
 ### Parameter Status Definitions
 * **Placeholder:** Unconfirmed baseline value awaiting measurement or confirmation from twin maintainers (see [decisions.md](decisions.md)).
@@ -28,16 +28,17 @@ This sheet catalogs every parameter in the simulation model ([simulations/omnetp
 
 | Parameter | INI / NED Key | Baseline Value | Units | Status | Source / Reference | Rationale & Notes |
 | :--- | :--- | :--- | :--- | :---: | :--- | :--- |
-| **Sim Time Limit** | `sim-time-limit` | `60` | s | Verified | Working assumption (Q5); C9 | Run duration; validated in C9 pilot for statistical sample size adequacy ($n \ge 10^4$ for $p_{99}$). |
-| **Warmup Period** | `warmup-period` | `5` | s | Verified | C9 Pilot Validation | Transient cutoff; validated via 338k vector queue samples (stationary at 79.27 pkts, max dev 0.04 pkts). |
-| **Number of RNGs** | `num-rngs` | `3` | - | Verified | Architecture choice (C8) | `rng-0`: MAC/protocols, `rng-1`: traffic generators, `rng-2`: AMR mobility. Validated in C8. |
-| **App Generator RNG** | `**.app[*].source.rng-0` | `1` | - | Verified | Architecture choice (C8) | Guarantees offered load parity across cells. Validated in C8. |
-| **AMR Mobility RNG** | `*.amr[*].mobility.rng-0` | `2` | - | Verified | Architecture choice (C8) | Dedicated spatial stream; identical AMR positions in CSMA and Sched. Validated in C8. |
-| **Replication Count** | `repeat` | `10` | runs | Verified | C9 Pilot Validation | Target confidence interval half-width (Jain formula) validated in C9 pilot ($R=10$). |
+| **Sim Time Limit** | `sim-time-limit` | `60` | s | Decision | Experiment design | Run duration; common horizon removes generations whose 100 ms consumption point exceeds it. |
+| **Warmup Period** | `warmup-period` | `5` | s | Rerun required | C9 | Transient cutoff to be revalidated by the repaired pilot. |
+| **Number of RNGs** | `num-rngs` | `3` | - | Decision | Architecture choice (C8) | `rng-0`: MAC/protocols, `rng-1`: traffic and global tick phases, `rng-2`: AMR mobility. |
+| **App Generator RNG** | `**.app[*].source.rng-0` | `1` | - | Decision | Architecture choice (C8) | Gives offered-load parity across paired cells. |
+| **Global Tick-Phase RNG** | `*.experimentCoordinator.rng-1` | `1` | - | Decision | Experiment contract | One draw for each `T={10,50,500} ms` per replication. |
+| **AMR Mobility RNG** | `*.amr[*].mobility.rng-0` | `2` | - | Decision | Architecture choice (C8) | Dedicated spatial stream. |
+| **Replication Count** | `repeat` | `22` | runs | Decision | Repaired C9 gate | Conservative floor; `pilot_run.py` must confirm it using the primary Definition-B miss rate. |
 | **Seed Set** | `seed-set` | `${repetition}` | - | Decision | Standard OMNeT++ | Controlled pseudo-random seed variation. |
 | **Vector Recording** | `**.vector-recording` | `false` | bool | Decision | Implementation Guide Step 5.1 | Disabled for campaign runs; enabled only in `[Config Debug]`. |
 | **Scalar Recording** | `**.scalar-recording` | `true` | bool | Decision | Implementation Guide Step 5.1 | Summary statistics, drop counters, and packet totals. |
-| **Histogram Recording**| `**.histogram-recording`| `true` | bool | Decision | Implementation Guide Step 5.1 | Captures delay/jitter distributions without vector file bloat. |
+| **Histogram/Bin Recording**| `**.bin-recording`| `true` | bool | Decision | INET result recording | Captures histogram bins without full campaign vectors. |
 
 ---
 
@@ -65,7 +66,7 @@ This sheet catalogs every parameter in the simulation model ([simulations/omnetp
 | **Link speed rationale** | $100$ Mbps kept as a scale model | Decision | Scaling capacity relative to background load studies the queueing knee without simulating ten times more packets. |
 | **AMR-to-AP / AMR-to-AMR distance** | $\le 42.43$ m / $\le 84.85$ m | Verified (analytic) | Received power $-59.6$ dBm and $-65.7$ dBm, above the $-85$ dBm sensitivity: no hidden terminals. |
 | **Spatial RNG** | Dedicated stream for AMR coordinates | Decision | Same positions in `Radio_CSMA` and `Radio_Sched` for a given seed (checklist C8). |
-| **Baseline grid size** | $6 \times 5 \times 3 = 90$ points (was 72); densified production grid about $2{,}400$ to $6{,}000$ runs | Decision | $6 \times 5 \times (8\text{ to }10) \times 10 \times (1\text{ to }2)$; to be costed in the pilot (checklist C9). |
+| **Production grid size** | $10{,}560$ runs | Decision | $6 \times 5 \times 8 \times 2 \times 22$; exporter rejects missing keys and repetitions. |
 
 ---
 
@@ -83,7 +84,7 @@ This sheet catalogs every parameter in the simulation model ([simulations/omnetp
 | **STA Management Type**| `wlan[*].mgmt.typename` | `Ieee80211MgmtStaSimplified`| - | Decision | INET examples | Simplified STA management paired with AP. |
 | **Management Channels**| `**.mgmt.numChannels` | `2` | - | Verified | INET requirement | Required by INET simplified 802.11 management submodule. |
 | **Operation Mode** | `**.wlan[*].opMode` | `g(erp)` | - | Decision | Q5 (approved Oct 14) | IEEE 802.11g ERP-OFDM mode. |
-| **Wireless Bitrate** | `**.wlan[*].bitrate` | `54` (Sweep: `54, 12`) | Mbps | Decision | Q5, Q8 (locked Oct 14) | 802.11g baseline PHY rate; 12 Mbps factor in sweep. |
+| **Wireless Bitrate** | `*.wirelessPhyRate`, `**.wlan[*].bitrate` | `54` (Sweep: `54, 12`) | Mbps | Decision | Q5, Q8 (locked Oct 14) | The shared root parameter drives scheduled slot geometry and is bound to the same `phyRate` factor as every WLAN bitrate. |
 | **Transmitter Power** | `transmitter.power` | `20` | mW | Decision | INET default (13 dBm) | Adopted standard 20 mW (13 dBm) transmitter power. |
 | **Carrier Frequency** | `transmitter.centerFrequency` | `2.412` | GHz | Decision | INET default Channel 1 | Standard 802.11 Channel 1 (2.412 GHz). |
 | **Receiver Sensitivity**| `receiver.sensitivity` | `-85` | dBm | Decision | INET `Ieee80211Radio` | Demodulation threshold for basic sensitivity. |
@@ -158,7 +159,7 @@ Based on the analytic capacity model ([analysis/capacity.py](../analysis/capacit
 | **Tier 1: network budget $D^{\text{net}}_c$** | Orders $50$ ms; State $50$ ms; DDS $5$ ms; Telemetry $100$ ms | Decision (experimental parameters) | 3GPP TS 22.104 and 5G-ACIA ranges: AGV guidance $10$ to $50$ ms; interlocking $1$ to $5$ ms; monitoring $10$ to $100$ ms. |
 | **Tier 1 sensitivity markers** | State and Orders at $10$ ms and $20$ ms | Decision | Tighter operational baseline (checklist A3). |
 | **Deadline spectrum $D$** | $\{1, 2, 5, 10, 20, 50, 100\}$ ms | Decision | Continuous Miss-vs-$D$ curves for Definitions A and B (decisions.md §1.7). |
-| **Tier 2: twin watchdog $\text{TTL}^{\text{app}}_c$** | CNP, 2PC, `await_station_start`, `tProc`: **unknown** | **Open** | Constants requested from the maintainers; recorded separately from $D^{\text{net}}_c$. |
+| **Experiment watchdog TTL** | Orders 50 ms; DDS 5 ms | **Decision** | Explicit surrogate used by `omnetpp.ini`, equal to each nominal deadline. The production twin's protocol-specific constants remain external and are not claimed here. |
 | **Staleness measure** | $\Delta k_{\text{stale}} = \max(0, \lceil a/T \rceil - \lceil (g + L_c)/T \rceil)$ for delivered State/Telemetry | Decision | `DeadlineSink` histogram and offline eCDF evaluation. |
 
 ### 6.2 Transport Fidelity (Q4, Oct 14, 2026)
@@ -177,11 +178,11 @@ Based on the analytic capacity model ([analysis/capacity.py](../analysis/capacit
 
 | Parameter | INI Key | Value | Status | Reference / Rationale |
 | :--- | :--- | :--- | :---: | :--- |
-| **Stream Identification** | `*.tsnSwitch.hasOutgoingStreams` | `true` | Decision | Required to classify untagged packets entering from AP or stations. |
-| **Stream Classifier Mapping** | `streamIdentifier.identifier.mapping` | `orders: port 5051`<br>`dds: port 5100`<br>`state: port 5050`<br>`telemetry: port 5200` | Decision | Classifies L4 UDP streams at switch ingress. |
-| **Stream Priority Encoder** | `streamCoder.encoder.mapping` | `orders &rarr; PCP 6`<br>`dds &rarr; PCP 4`<br>`state &rarr; PCP 2`<br>`telemetry &rarr; PCP 0` | Decision | 4 traffic classes mapped to IEEE 802.1Q priority code points. |
+| **Stream Identification** | `*.fms.hasOutgoingStreams`; `*.tsnSwitch.hasIncomingStreams/hasOutgoingStreams` | `true` | Decision + runtime smoke test | Orders are encoded at the FMS and decoded at switch ingress; the switch identifies the untagged State, DDS, and Telemetry inputs. |
+| **Stream Classifier Mapping** | `streamIdentifier.identifier.mapping` | FMS: `orders: port 5051`<br>Switch: `dds: port 5100`, `state: port 5050`, `telemetry: port 5200` | Decision + runtime smoke test | Moving Orders identification to the FMS lets the switch remove its C-tag before forwarding toward the non-TSN AP. |
+| **Stream Priority Encoder/Decoder** | `streamCoder.encoder/decoder.mapping` | FMS encoder: `orders &rarr; PCP 6`<br>Switch decoder: `PCP 6 &rarr; orders`<br>Switch encoder: `dds &rarr; 4`, `state &rarr; 2`, `telemetry &rarr; 0` | Decision + runtime smoke test | All four classes retain their queue PCP; Orders is not re-encapsulated on the switch-to-AP link. |
 | **PCP to Queue Mapping** | INET internal classifier | `PCP (6, 4, 2, 0) &rarr; TC (3, 2, 1, 0)` | Verified | Standard INET `PcpTrafficClassClassifier` mapping for 4 queues. |
-| **Tag Stripping on Egress** | `excludeEncapsulationProtocols` | `["ieee8021qctag"]` | Decision | Configured on `tsnSwitch.bridging.directionReverser` to prevent sending 802.1Q tags to untagged/radio ports. |
+| **Tag Stripping on Egress** | `excludeEncapsulationProtocols` | `["ieee8021qctag"]` | Decision + runtime smoke test | The FMS-originated Orders tag is decoded at switch ingress and excluded on relay, preventing an 802.1Q payload from reaching the AP WLAN LLC. |
 | **MAC Address Learner** | `interfaceRelay.learner.typename` | `RelayInterfaceLearner` | Decision | Re-enables dynamic MAC learning because AMR MACs reside behind the AP bridge. |
 
 ---
@@ -213,9 +214,9 @@ Based on the analytic capacity model ([analysis/capacity.py](../analysis/capacit
 | Parameter | Configuration | Mode / Mechanism | Baseline Value | Status | Rationale & Target |
 | :--- | :--- | :--- | :--- | :---: | :--- |
 | **CSMA/CA** | `[Config Radio_CSMA]` (Cell 1, 3, 5) | Standard IEEE 802.11 DCF | Default | Decision | Baseline contention access. |
-| **Scheduled MAC Typename**| `[Config Radio_Sched]` (Cell 2, 4, 6) | `ScheduledDcf` (Spike S1) | `ScheduledDcf` | Verified | Implemented in `src/ScheduledDcf.cc`; verified with 0 collisions at $N=40$ (see `docs/results.md` §3). |
-| **Slot Duration** | `slotDuration` | `400 µs` @ 54Mbps, `1000 µs` @ 12Mbps | µs | Decision | 258 µs exchange + 142 µs margin @ 54Mbps; 814 µs + 186 µs margin @ 12Mbps. |
-| **Superframe Duration** | `superframeDuration` | Dynamic ($3, 5, 9, 20, 48\text{ ms}$ for $N=5..80$) | ms | Decision | Integer multiple of 1 ms TAS cycle; sized to prevent slot overruns. |
+| **Scheduled MAC Typename**| `[Config Radio_Sched]` (Cell 2, 4, 6) | `ScheduledDcf` | `ScheduledDcf` | Implemented; acceptance passed | Uses explicit time offsets and direction-specific slot widths; the 10 s nominal and worst-case acceptance points pass. |
+| **Slot Duration** | `slotDuration` | 54 Mbps: 400 µs both directions; 12 Mbps: 850 µs State, 560 µs Orders | µs | Decision | Required exchanges are 260/200 µs at 54 Mbps and 820/550 µs at 12 Mbps. |
+| **Superframe Duration** | `superframeDuration` | 54 Mbps: 3, 5, 9, 20, 48 ms; 12 Mbps: 6, 10, 20, 42, 90 ms | ms | Decision | Per-flow service remains at or above offered load; N=80 does not exceed the 90 ms minimum State interarrival. |
 | **Contention Backoff** | `cwMin/cwMax` | `0` | slots | Decision | Zero backoff slots in scheduled mode. |
 | **Phase Offset to TAS** | `cyclePhaseOffset` | Configurable (`0us` default) | µs | Decision | Gated to arrive at switch in $[300, 414.4)\ \mu\text{s}$ for zero gate wait. |
 
@@ -225,9 +226,9 @@ Based on the analytic capacity model ([analysis/capacity.py](../analysis/capacit
 
 | Parameter | Value | Status | Source / Rationale |
 | :--- | :--- | :---: | :--- |
-| **Tables** | `lookup_summary` (point metrics) and `lookup_ecdf` (delay quantiles), each as tidy CSV with JSON mirror | Decision | Maintainers aligned (Oct 14); decisions.md §5. |
+| **Tables** | `lookup_summary`, `lookup_ecdf`, and `lookup_replications` | Decision | Replication table supports paired-seed bottleneck contrasts. |
 | **Dimension keys** | `cell`, `class`, `N_AMR`, `lambda_tel_Mbps`, `phy_rate_Mbps` | Decision | Categorical: `cell`, `class`. Continuous: `N_AMR`, `lambda_tel_Mbps`. |
-| **Quantile levels (24)** | $0.0, 0.01, 0.02, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50, 0.60, 0.70, 0.75, 0.80, 0.85, 0.90, 0.92, 0.95, 0.97, 0.98, 0.99, 0.995, 0.999, 1.0$ | Decision | Conditional on delivered packets; losses are in `p_loss`. High-resolution upper tail representation. |
+| **Quantile levels (25)** | $0.0, 0.01, 0.02, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50, 0.60, 0.70, 0.75, 0.80, 0.85, 0.90, 0.92, 0.95, 0.97, 0.98, 0.99, 0.995, 0.999, 1.0$ | Decision | Conditional on delivered packets; physical loss is separate. |
 | **Miss columns** | `miss_A_*` and `miss_B_*` for $D \in \{1, 2, 5, 10, 20, 50, 100\}$ ms | Decision | Definition B at $T = 10$ ms, $L = D$; other $T$ and $L_c = T$ computed offline. |
 | **Interpolation** | Quantile-space (horizontal) with monotone PCHIP along `N_AMR` and `lambda_tel_Mbps`; non-crossing guard; delays clipped to $\ge 0$ | Decision | Fritsch & Carlson (1980); Wasserstein geodesic. |
 | **Saturation clamping** | Nearest neighbor for $\lambda_{\text{tel}} > 100$ Mbps (FIFO) and $> 44.8$ Mbps (TAS telemetry) | Decision | decisions.md §5.4. |
@@ -235,4 +236,4 @@ Based on the analytic capacity model ([analysis/capacity.py](../analysis/capacit
 | **Runtime consumption** | Mode 2: seeded inverse-transform sampling with independent $u_{\text{loss}}, u_{\text{delay}}$ per flow; Mode 1 summary lookup as fallback | Decision | Preserves `SeededReplaySeed1Test` determinism. |
 | **Pre-densified fine grid** | Optional export if the maintainers prefer no cubic math in Java | Open | Ask in the ingestion test. |
 | **Preferred format and resource path** | CSV vs. JSON; location in the Java resource tree | **Open** | Confirm with the 1-cell, 1-$N$, 1-$\lambda$ prototype. |
-| **Tail-sample flags** | `insufficient_tail_samples` when pooled $n < 10^4$ ($p_{99}$) or $< 10^5$ ($p_{99.9}$) | Decision | decisions.md §1.6. |
+| **Tail-sample flags** | Separate `flag_p99` and `flag_p99_9` | Decision | Delivered-sample thresholds are $10^4$ and $10^5$. |

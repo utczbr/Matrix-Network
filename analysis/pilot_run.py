@@ -29,8 +29,10 @@ from env_config import (
     SIM_DIR,
     OMNETPP_ENV_STR as OMNETPP_ENV,
     INET_ROOT_STR as INET_ROOT,
+    MATRIXFACTORY_LIB_STR as MATRIXFACTORY_LIB,
 )
-RES_DIR = SIM_DIR / "results"
+RES_DIR = SIM_DIR / "results" / "pilot"
+CAMPAIGN_REPS = 22
 
 TEL_INTERVALS = [
     (2000, 22.4),
@@ -51,13 +53,15 @@ def run_simulation(config, sim_time="15s", warmup="5s", tel_us=2000, seed=0, ext
         f"export INET_ROOT={INET_ROOT} && "
         f"cd {SIM_DIR} && "
         f"opp_run -n $INET_ROOT/src:../src:. "
-        f"-l $INET_ROOT/src/INET -l ../out/gcc-release/matrixfactory "
-        f"-c {config} -u Cmdenv "
-        f"'--sim-time-limit={sim_time}' '--warmup-period={warmup}' "
+        f"-l $INET_ROOT/src/INET -l {MATRIXFACTORY_LIB} "
+        f"-c {config} -u Cmdenv omnetpp.ini "
+        f"'--sim-time-limit={sim_time}' '--**.simTimeLimit={sim_time}' "
+        f"'--warmup-period={warmup}' '--**.warmupTime={warmup}' "
         f"'--*.station[*].app[1].source.productionInterval=exponential({tel_us}us)' "
         f"'--*.station[*].app[1].source.initialProductionOffset=uniform(0s, {tel_us}us)' "
         f"'--seed-set={seed}' "
-        f"{extra_args} omnetpp.ini"
+        f"'--result-dir={RES_DIR}' "
+        f"{extra_args}"
     )
     res = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True)
     if res.returncode != 0:
@@ -83,6 +87,16 @@ def parse_scalar_file(sca_path):
                     except ValueError:
                         pass
     return scalars
+
+def require_scalar(scalars, key):
+    if key not in scalars:
+        raise RuntimeError(f"required scalar {key!r} is absent")
+    return scalars[key]
+
+def coordinator_drop_total(scalars):
+    keys = [f"MatrixFactoryNetwork.experimentCoordinator n_drop_queue_{cls}"
+            for cls in ("orders", "dds", "state", "telemetry")]
+    return int(sum(require_scalar(scalars, key) for key in keys))
 
 def parse_vector_data(vec_path, module_substr, vector_substr):
     """Parses time-series points for a specific vector name from an OMNeT++ .vec file."""
@@ -124,10 +138,12 @@ def task1_warmup_validation():
     print("=" * 70)
     print("[*] Running Cell 1 under saturation load (telInterval = 300us, 149.3 Mbps) with vector tracing...")
 
-    # Clear previous results
+    # Clear only this pilot's dedicated top-level result files.
+    RES_DIR.mkdir(parents=True, exist_ok=True)
     for f in os.listdir(RES_DIR):
-        if f.endswith(".sca") or f.endswith(".vec") or f.endswith(".vci"):
-            os.remove(RES_DIR / f)
+        path = RES_DIR / f
+        if path.is_file() and (f.endswith(".sca") or f.endswith(".vec") or f.endswith(".vci")):
+            os.remove(path)
 
     run_simulation(
         "Cell1",
@@ -145,8 +161,7 @@ def task1_warmup_validation():
             break
 
     if not vec_file or not vec_file.exists():
-        print("[!] Vector file not found. Falling back to scalar inspection.")
-        return
+        raise RuntimeError("warm-up validation vector file was not produced")
 
     # Extract queue length points over time on switch egress to FMS (eth[0])
     points = parse_vector_data(vec_file, "tsnSwitch.eth[0].macLayer.queue", "queueLength:vector")
@@ -171,51 +186,52 @@ def task1_warmup_validation():
         else:
             print(f"   [{s:02d}.0s, {s+1:02d}.0s)    |            0 |                - |         - |         -")
 
-    warmup_mean = sum(means[0:5]) / len(means[0:5]) if len(means) >= 5 else 0
-    steady_mean = sum(means[5:]) / len(means[5:]) if len(means) > 5 else 0
+    missing_buckets = [second for second, values in buckets.items() if not values]
+    if missing_buckets:
+        raise RuntimeError(f"warm-up validation has empty one-second buckets: {missing_buckets}")
+    means = [sum(buckets[second]) / len(buckets[second]) for second in range(15)]
+    warmup_mean = sum(means[:5]) / 5
+    steady_mean = sum(means[5:]) / 10
 
     print(f"\n  Initial Transient Mean (0-5s): {warmup_mean:.2f} pkts")
     print(f"  Steady State Mean     (5-15s): {steady_mean:.2f} pkts")
 
-    if len(means) >= 10:
-        max_dev = max(abs(m - steady_mean) for m in means[5:])
-        print(f"  Max 1s-bucket deviation in steady state: {max_dev:.2f} packets")
-        if max_dev < 15.0:
-            print("  [✓] WARMUP VALIDATION PASSED: Queue dynamics fully stabilize within 5.0 s.")
-        else:
-            print("  [✓] WARMUP VALIDATION CONFIRMED: Queue reaches stationary saturation state.")
-    else:
-        print("  [✓] Warmup validation completed.")
+    max_dev = max(abs(m - steady_mean) for m in means[5:])
+    print(f"  Max 1s-bucket deviation in steady state: {max_dev:.2f} packets")
+    if max_dev >= 15.0:
+        raise RuntimeError(
+            f"5 s warm-up is not validated: steady-state bucket deviation is {max_dev:.2f} packets")
+    print("  [✓] WARMUP VALIDATION PASSED: Queue dynamics stabilize within the configured tolerance.")
 
 def exec_point(task):
     """Worker task executed in parallel by ProcessPoolExecutor."""
     cfg, tel_us, mbps = task
     worker_dir = RES_DIR / f"{cfg}_{tel_us}"
     os.makedirs(worker_dir, exist_ok=True)
+    for path in worker_dir.iterdir():
+        if path.is_file() and path.suffix in {".sca", ".vec", ".vci", ".elog"}:
+            path.unlink()
 
     cmd = (
         f"source {OMNETPP_ENV} && "
         f"export INET_ROOT={INET_ROOT} && "
         f"cd {SIM_DIR} && "
         f"opp_run -n $INET_ROOT/src:../src:. "
-        f"-l $INET_ROOT/src/INET -l ../out/gcc-release/matrixfactory "
-        f"-c {cfg} -u Cmdenv "
-        f"'--sim-time-limit=15s' '--warmup-period=5s' "
+        f"-l $INET_ROOT/src/INET -l {MATRIXFACTORY_LIB} "
+        f"-c {cfg} -u Cmdenv omnetpp.ini "
+        f"'--sim-time-limit=15s' '--**.simTimeLimit=15s' '--warmup-period=5s' "
         f"'--*.station[*].app[1].source.productionInterval=exponential({tel_us}us)' "
         f"'--*.station[*].app[1].source.initialProductionOffset=uniform(0s, {tel_us}us)' "
-        f"'--result-dir={worker_dir}' "
-        f"omnetpp.ini"
+        f"'--result-dir={worker_dir}'"
     )
     res = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True)
     if res.returncode != 0:
-        print(f"[!] Error in {cfg} at {tel_us}us: {res.stderr[:200]}")
-        return (cfg, tel_us, mbps, {})
+        raise RuntimeError(f"{cfg} at {tel_us}us failed:\n{res.stderr[:500]}")
 
-    sc_data = {}
-    for f in os.listdir(worker_dir):
-        if f.endswith(".sca"):
-            sc_data = parse_scalar_file(worker_dir / f)
-            break
+    scalar_files = list(worker_dir.glob("*.sca"))
+    if len(scalar_files) != 1:
+        raise RuntimeError(f"{cfg} at {tel_us}us: expected one scalar file, found {len(scalar_files)}")
+    sc_data = parse_scalar_file(scalar_files[0])
     return (cfg, tel_us, mbps, sc_data)
 
 def task2_knee_identification():
@@ -245,12 +261,12 @@ def task2_knee_identification():
         _, sc1 = results.get(("Cell1", tel_us), (mbps, {}))
         _, sc5 = results.get(("Cell5", tel_us), (mbps, {}))
 
-        drops_c1 = int(sc1.get("MatrixFactoryNetwork.tsnSwitch.eth[0].macLayer.queue droppedPackets:count", 0))
-        dds_miss_c1 = int(sc1.get("MatrixFactoryNetwork.fms.app[2].sink n_miss_A_5ms", 0))
-        state_p99_c1 = sc1.get("MatrixFactoryNetwork.fms.app[0].sink lat_p99_ms", 0.0)
+        drops_c1 = coordinator_drop_total(sc1)
+        dds_miss_c1 = int(require_scalar(sc1, "MatrixFactoryNetwork.fms.app[2].sink n_miss_B_5ms"))
+        state_p99_c1 = require_scalar(sc1, "MatrixFactoryNetwork.fms.app[0].sink lat_p99_ms")
 
-        drops_c5 = int(sc5.get("MatrixFactoryNetwork.tsnSwitch.eth[0].macLayer.queue.queue[0] droppedPackets:count", 0))
-        dds_miss_c5 = int(sc5.get("MatrixFactoryNetwork.fms.app[2].sink n_miss_A_5ms", 0))
+        drops_c5 = coordinator_drop_total(sc5)
+        dds_miss_c5 = int(require_scalar(sc5, "MatrixFactoryNetwork.fms.app[2].sink n_miss_B_5ms"))
 
         print(f"{mbps:8.1f} | {drops_c1:12d} | {dds_miss_c1:20d} | {state_p99_c1:18.2f}ms | {drops_c5:12d} | {dds_miss_c5:20d}")
 
@@ -258,11 +274,9 @@ def task2_knee_identification():
             knee_found = True
             print(f"  --> [!] FIFO SATURATION KNEE DETECTED AT {mbps} Mbps (FIFO queue overflow commences).")
 
-    print("\n  [✓] KEY ARCHITECTURAL CONFIRMATION (Finding F1):")
-    print("      Under Wired FIFO (Cell 1), background telemetry exceeding ~85 Mbps exhausts switch buffer capacity,")
-    print("      causing queue delays up to 9.4 ms and inducing deadline misses on DDS traffic (D = 5 ms).")
-    print("      Under Wired TAS (Cell 5), GCL gate scheduling isolates DDS (TC 2) and State (TC 1),")
-    print("      guaranteeing ZERO deadline misses across all telemetry saturation levels.")
+    if not knee_found:
+        raise RuntimeError("FIFO saturation knee was not observed; the pilot cannot validate the load bracket")
+    print("\n  [✓] FIFO saturation knee observed; reported values above come from exact coordinator drop counters.")
 
 def task3_replication_sizing():
     print("\n" + "=" * 70)
@@ -279,29 +293,40 @@ def task3_replication_sizing():
     for seed in range(5):
         seed_dir = worker_dir / f"seed_{seed}"
         os.makedirs(seed_dir, exist_ok=True)
+        for path in seed_dir.iterdir():
+            if path.is_file() and path.suffix in {".sca", ".vec", ".vci", ".elog"}:
+                path.unlink()
         cmd = (
             f"source {OMNETPP_ENV} && "
             f"export INET_ROOT={INET_ROOT} && "
             f"cd {SIM_DIR} && "
             f"opp_run -n $INET_ROOT/src:../src:. "
-            f"-l $INET_ROOT/src/INET -l ../out/gcc-release/matrixfactory "
-            f"-c Cell1 -u Cmdenv "
-            f"'--sim-time-limit=15s' '--warmup-period=5s' "
+            f"-l $INET_ROOT/src/INET -l {MATRIXFACTORY_LIB} "
+            f"-c Cell1 -u Cmdenv omnetpp.ini "
+            f"'--sim-time-limit=15s' '--**.simTimeLimit=15s' '--warmup-period=5s' "
             f"'--*.station[*].app[1].source.productionInterval=exponential({tel_us}us)' "
             f"'--*.station[*].app[1].source.initialProductionOffset=uniform(0s, {tel_us}us)' "
             f"'--seed-set={seed}' "
-            f"'--result-dir={seed_dir}' "
-            f"omnetpp.ini"
+            f"'--result-dir={seed_dir}'"
         )
-        subprocess.run(["bash", "-c", cmd], capture_output=True, text=True)
-        for f in os.listdir(seed_dir):
-            if f.endswith(".sca"):
-                sc = parse_scalar_file(seed_dir / f)
-                lat_p99 = sc.get("MatrixFactoryNetwork.fms.app[0].sink lat_p99_ms", 0.0)
-                sample_values.append(lat_p99)
-                break
+        result = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(f"Jain pilot seed {seed} failed:\n{result.stderr[:500]}")
+        scalar_files = list(seed_dir.glob("*.sca"))
+        if len(scalar_files) != 1:
+            raise RuntimeError(f"Jain pilot seed {seed}: expected one scalar file, found {len(scalar_files)}")
+        sc = parse_scalar_file(scalar_files[0])
+        generated = require_scalar(sc, "MatrixFactoryNetwork.experimentCoordinator n_generated_valid_dds")
+        delivered_miss = require_scalar(sc, "MatrixFactoryNetwork.fms.app[2].sink n_miss_B_5ms")
+        terminal_miss = sum(require_scalar(sc, f"MatrixFactoryNetwork.experimentCoordinator {name}_dds")
+                            for name in ("n_drop_queue", "n_drop_retry", "n_drop_other", "n_late_termination"))
+        if generated <= 0:
+            raise RuntimeError(f"Jain pilot seed {seed}: no valid DDS generations")
+        sample_values.append((delivered_miss + terminal_miss) / generated)
 
-    print(f"  [+] Observed State p99 latency across 5 independent seeds: {[round(v, 3) for v in sample_values]} ms")
+    if len(sample_values) != 5:
+        raise RuntimeError(f"expected 5 pilot miss-rate samples, found {len(sample_values)}")
+    print(f"  [+] Observed DDS Definition-B miss rates across 5 seeds: {[round(v, 6) for v in sample_values]}")
     mean_val = sum(sample_values) / len(sample_values)
     variance = sum((x - mean_val) ** 2 for x in sample_values) / (len(sample_values) - 1)
     std_dev = math.sqrt(variance)
@@ -311,13 +336,14 @@ def task3_replication_sizing():
 
     if mean_val > 0 and std_dev > 0:
         n_req = ((z * std_dev) / (r * mean_val)) ** 2
-        print(f"  Sample Mean: {mean_val:.4f} ms | Sample StdDev: {std_dev:.4f} ms")
+        print(f"  Sample Mean: {mean_val:.6f} | Sample StdDev: {std_dev:.6f}")
         print(f"  Jain's Required Replications (r = 5%, 95% CI): {math.ceil(n_req)} runs")
     else:
-        print("  Zero variance across seeds in deterministic regime.")
-        n_req = 10
+        raise RuntimeError("relative-error sizing is undefined for a zero-mean or zero-variance pilot; collect more boundary seeds")
 
-    print("  [✓] Sizing verification: R = 10 replications provides ample statistical confidence across all configurations.")
+    if math.ceil(n_req) > CAMPAIGN_REPS:
+        raise RuntimeError(f"configured R={CAMPAIGN_REPS} is below the pilot requirement {math.ceil(n_req)}")
+    print(f"  [✓] Sizing verification: configured R = {CAMPAIGN_REPS} meets the primary miss-rate pilot requirement.")
 
 def task4_sample_size_audit():
     print("\n" + "=" * 70)
@@ -326,9 +352,9 @@ def task4_sample_size_audit():
     print("  Fleet Size N | State Pooled (n) | Orders Pooled (n) | DDS Pooled (n) | p99 Valid? | p99.9 Valid?")
     print("  -------------+------------------+-------------------+----------------+------------+-------------")
     for n in [5, 10, 20, 40, 80]:
-        state_n = n * 10 * 55 * 10
-        orders_n = n * 5 * 55 * 10
-        dds_n = 4 * 100 * 55 * 10
+        state_n = n * 10 * 55 * CAMPAIGN_REPS
+        orders_n = n * 5 * 55 * CAMPAIGN_REPS
+        dds_n = 4 * 100 * 55 * CAMPAIGN_REPS
         p99_ok = "YES" if min(state_n, orders_n) >= 10000 else "NO"
         p99_9_ok = "YES" if min(state_n, orders_n) >= 100000 else "FLAGGED"
         print(f"  {n:12d} | {state_n:16,d} | {orders_n:17,d} | {dds_n:14,d} | {p99_ok:10} | {p99_9_ok:12}")
