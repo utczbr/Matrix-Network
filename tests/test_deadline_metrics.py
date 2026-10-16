@@ -139,6 +139,12 @@ def test_student_t_halfwidth():
     assert dm.student_t_halfwidth([0.0, 0.0, 0.0]) == 0.0
 
 
+def test_wilson_upper_keeps_zero_observations_honest():
+    assert dm.wilson_upper(0, 1000) == pytest.approx(3.826758485555124e-3)
+    assert 0.0 < dm.wilson_upper(0, 100_000) < dm.wilson_upper(0, 1000)
+    assert np.isnan(dm.wilson_upper(1, 0))
+
+
 def test_replication_phase_is_reproducible_and_in_range():
     p = [dm.replication_phase_ms(0, r) for r in range(50)]
     assert p == [dm.replication_phase_ms(0, r) for r in range(50)]

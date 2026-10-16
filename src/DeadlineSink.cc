@@ -5,6 +5,8 @@
 //
 
 #include "DeadlineSink.h"
+#include "ExperimentCoordinator.h"
+#include "ExperimentPacketTag_m.h"
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
@@ -32,9 +34,8 @@ void DeadlineSink::initialize(int stage)
         isZohFlow = par("isZohFlow").boolValue();
         warmupTime = par("warmupTime");
         simTimeLimit = par("simTimeLimit");
-        randomizeTickPhase = par("randomizeTickPhase").boolValue();
-        fixedTickPhase = par("fixedTickPhase");
-        phaseRngIndex = par("phaseRngIndex");
+        experimentCoordinator = check_and_cast<ExperimentCoordinator *>(
+            getSimulation()->getSystemModule()->getSubmodule("experimentCoordinator"));
 
         for (size_t k = 0; k < NUM_DEADLINES; ++k) {
             deadlineRaw[k] = SimTime(DEADLINE_SPECTRUM_MS[k], SIMTIME_MS).raw();
@@ -44,16 +45,7 @@ void DeadlineSink::initialize(int stage)
             simtime_t tPeriod = SimTime(TICK_PERIODS_MS[m], SIMTIME_MS);
             tickPeriodRaw[m] = tPeriod.raw();
 
-            if (randomizeTickPhase) {
-                double phiSec = uniform(0.0, tPeriod.dbl(), phaseRngIndex);
-                tickPhaseRaw[m] = SimTime(phiSec).raw();
-            }
-            else {
-                int64_t fRaw = fixedTickPhase.raw() % tickPeriodRaw[m];
-                if (fRaw < 0)
-                    fRaw += tickPeriodRaw[m];
-                tickPhaseRaw[m] = fRaw;
-            }
+            tickPhaseRaw[m] = experimentCoordinator->getTickPhaseRaw(m);
 
             std::string histName = "stalenessTicks_" + std::to_string(TICK_PERIODS_MS[m]) + "ms";
             stalenessTicksHist[m].setName(histName.c_str());
@@ -95,32 +87,40 @@ simtime_t DeadlineSink::extractCreationTime(const Packet *packet)
     return packet->getCreationTime();
 }
 
-void DeadlineSink::recordDomainBreakdown(const Packet *packet, double e2eDelaySec)
+void DeadlineSink::recordDomainBreakdown(const Packet *packet, simtime_t generationTime, simtime_t arrivalTime)
 {
-    double totalQueueingSec = 0.0;
-    double totalPropagationSec = 0.0;
-    double totalTransmissionSec = 0.0;
+    const auto tags = packet->getAllRegionTags<ExperimentPacketTag>();
+    if (tags.empty())
+        throw cRuntimeError("DeadlineSink: application packet arrived without ExperimentPacketTag");
+    const auto tag = tags.front().getTag();
+    if (tag->getTrafficClass() != trafficClass)
+        throw cRuntimeError("DeadlineSink: packet class '%s' arrived at '%s' sink",
+            tag->getTrafficClass(), trafficClass.c_str());
 
-    for (int i = 0; i < packet->getNumRegionTags(); ++i) {
-        auto tag = packet->getRegionTag(i);
-        if (auto qTag = dynamicPtrCast<const QueueingTimeTag>(tag)) {
-            for (size_t j = 0; j < qTag->getPacketTotalTimesArraySize(); ++j)
-                totalQueueingSec += qTag->getPacketTotalTimes(j).dbl();
-        }
-        else if (auto pTag = dynamicPtrCast<const PropagationTimeTag>(tag)) {
-            for (size_t j = 0; j < pTag->getPacketTotalTimesArraySize(); ++j)
-                totalPropagationSec += pTag->getPacketTotalTimes(j).dbl();
-        }
-        else if (auto txTag = dynamicPtrCast<const TransmissionTimeTag>(tag)) {
-            for (size_t j = 0; j < txTag->getPacketTotalTimesArraySize(); ++j)
-                totalTransmissionSec += txTag->getPacketTotalTimes(j).dbl();
-        }
-    }
+    const bool wirelessFlow = trafficClass == "state" || trafficClass == "orders";
+    if (wirelessFlow && tag->getApBoundaryTime() < SIMTIME_ZERO)
+        throw cRuntimeError("DeadlineSink: missing AP boundary timestamp for %s packet id %ld",
+            trafficClass.c_str(), (long)tag->getPacketId());
+    if (tag->getSwitchQueueArrivalTime() < SIMTIME_ZERO || tag->getSwitchQueueDepartureTime() < SIMTIME_ZERO)
+        throw cRuntimeError("DeadlineSink: missing switch queue timestamps for %s packet id %ld",
+            trafficClass.c_str(), (long)tag->getPacketId());
 
-    double residualAirAndMacSec = std::max(0.0, e2eDelaySec - (totalQueueingSec + totalPropagationSec + totalTransmissionSec));
-    wirelessDomainDelayHist.collect(residualAirAndMacSec * 1000.0);
-    wiredSwitchDelayHist.collect(totalQueueingSec * 1000.0);
-    wireTxAndPropDelayHist.collect((totalTransmissionSec + totalPropagationSec) * 1000.0);
+    const simtime_t switchDelay = tag->getSwitchQueueDepartureTime() - tag->getSwitchQueueArrivalTime();
+    simtime_t wirelessDelay = SIMTIME_ZERO;
+    if (trafficClass == "state")
+        wirelessDelay = tag->getApBoundaryTime() - generationTime;
+    else if (trafficClass == "orders")
+        wirelessDelay = arrivalTime - tag->getApBoundaryTime();
+    const simtime_t e2eDelay = arrivalTime - generationTime;
+    const simtime_t wireOtherDelay = e2eDelay - switchDelay - wirelessDelay;
+    if (switchDelay < SIMTIME_ZERO || wirelessDelay < SIMTIME_ZERO || wireOtherDelay < SIMTIME_ZERO)
+        throw cRuntimeError("DeadlineSink: overlapping or reversed domain timestamps for %s packet id %ld",
+            trafficClass.c_str(), (long)tag->getPacketId());
+
+    wirelessDomainDelayHist.collect(wirelessDelay.dbl() * 1000.0);
+    wiredSwitchDelayHist.collect(switchDelay.dbl() * 1000.0);
+    wireTxAndPropDelayHist.collect(wireOtherDelay.dbl() * 1000.0);
+    nDomainBreakdownValid++;
 }
 
 void DeadlineSink::consumePacket(Packet *packet)
@@ -132,8 +132,7 @@ void DeadlineSink::consumePacket(Packet *packet)
     const int64_t gRaw = gSim.raw();
     const int64_t aRaw = aSim.raw();
     const int64_t tauRaw = aRaw - gRaw;
-    const double tauSec = (aSim - gSim).dbl();
-    const double tauMs = tauSec * 1000.0;
+    const double tauMs = (aSim - gSim).dbl() * 1000.0;
     const int64_t dNomRaw = nominalDeadline.raw();
 
     // 1. Warmup Transient Filter (decisions.md §1.5 item 1): discard if g < t_warmup
@@ -156,7 +155,11 @@ void DeadlineSink::consumePacket(Packet *packet)
     nValidDelivered++;
     e2eDelayHist.collect(tauMs);
     deliveredDelaysMs.push_back(tauMs);
-    recordDomainBreakdown(packet, tauSec);
+    const auto experimentTags = packet->getAllRegionTags<ExperimentPacketTag>();
+    if (experimentTags.empty() || !experimentTags.front().getTag()->getValidForMetrics())
+        throw cRuntimeError("DeadlineSink: delivered sample disagrees with the coordinator validity filter");
+    experimentCoordinator->markDelivered(experimentTags.front().getTag()->getPacketId(), tauMs);
+    recordDomainBreakdown(packet, gSim, aSim);
 
     // 3. Nominal Deadline Evaluation (Tier 1 D_c)
     if (tauRaw > dNomRaw)
@@ -207,8 +210,7 @@ void DeadlineSink::consumePacket(Packet *packet)
     }
 
     if (!isZohFlow) {
-        const int64_t cTtlRaw = computeConsumptionTickRaw(gRaw, appWatchdogTtl.raw(), tickPeriodRaw[0], tickPhaseRaw[0]);
-        if (aRaw > cTtlRaw) {
+        if (aRaw > gRaw + appWatchdogTtl.raw()) {
             nLateDiscardedTtl++;
         }
     }
@@ -230,6 +232,7 @@ void DeadlineSink::finish()
     recordScalar("n_late_nominal_A", nLateNominalA);
     recordScalar("n_late_nominal_B_10ms", nLateNominalB);
     recordScalar("n_late_discarded_ttl", nLateDiscardedTtl);
+    recordScalar("n_domain_breakdown_valid", nDomainBreakdownValid);
 
     for (size_t m = 0; m < NUM_TICK_PERIODS; ++m) {
         std::string phaseName = "tick_phase_offset_" + std::to_string(TICK_PERIODS_MS[m]) + "ms_sec";

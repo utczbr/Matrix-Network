@@ -13,36 +13,48 @@ from pathlib import Path
 
 # Ensure analysis directory is on sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from env_config import OMNETPP_ENV_STR as OMNETPP_ENV, INET_ROOT_STR as INET_ROOT, PROJECT_ROOT_STR as PROJECT_ROOT, SIM_DIR_STR as SIM_DIR
+from env_config import (
+    OMNETPP_ENV_STR as OMNETPP_ENV,
+    INET_ROOT_STR as INET_ROOT,
+    MATRIXFACTORY_LIB_STR as MATRIXFACTORY_LIB,
+    PROJECT_ROOT_STR as PROJECT_ROOT,
+    SIM_DIR_STR as SIM_DIR,
+)
 
 RATES = ["54Mbps", "24Mbps", "12Mbps", "6Mbps"]
+RES_ROOT = Path(SIM_DIR) / "results" / "calibrate_80211"
 
 def run_calibration():
     results = {}
     for rate in RATES:
         print(f"[*] Running Cell1 calibration at {rate}...")
+        run_dir = RES_ROOT / rate
+        run_dir.mkdir(parents=True, exist_ok=True)
+        for path in run_dir.iterdir():
+            if path.is_file() and path.suffix in {".sca", ".vec", ".vci", ".elog"}:
+                path.unlink()
         cmd = (
             f"source {OMNETPP_ENV} && "
             f"export INET_ROOT={INET_ROOT} && "
             f"cd {SIM_DIR} && "
             f"opp_run -n $INET_ROOT/src:../src:. "
-            f"-l $INET_ROOT/src/INET -l ../out/gcc-release/matrixfactory "
-            f"-c Cell1 -u Cmdenv "
+            f"-l $INET_ROOT/src/INET -l {MATRIXFACTORY_LIB} "
+            f"-c Cell1 -u Cmdenv omnetpp.ini "
             f"'--*.numAmrs=1' '--*.numStations=0' '--*.fms.numApps=4' "
             f"'--**.wlan[*].bitrate={rate}' "
-            f"'--sim-time-limit=10s' '--**.warmupTime=0s' "
+            f"'--sim-time-limit=10s' '--**.simTimeLimit=10s' '--**.warmupTime=0s' "
             f"'--**.frameSequenceDuration.result-recording-modes=+min,+max,+mean' "
-            f"omnetpp.ini"
+            f"'--result-dir={run_dir}'"
         )
         res = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True)
         if res.returncode != 0:
             print(f"[!] Error running {rate}: {res.stderr}")
             sys.exit(1)
 
-        # Find the latest .sca file in simulations/results
-        res_dir = os.path.join(SIM_DIR, "results")
-        sca_files = [os.path.join(res_dir, f) for f in os.listdir(res_dir) if f.endswith(".sca")]
-        latest_sca = max(sca_files, key=os.path.getmtime)
+        sca_files = list(run_dir.glob("*.sca"))
+        if len(sca_files) != 1:
+            raise RuntimeError(f"{rate}: expected one scalar file, found {len(sca_files)}")
+        latest_sca = sca_files[0]
 
         state_dur = None
         orders_dur = None

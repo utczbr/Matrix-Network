@@ -12,15 +12,15 @@ Implements only what is closed in docs/decisions.md (Oct 14, 2026):
 * Staleness in ticks for delivered State/Telemetry packets (section 1.1).
 * Offline evaluation of Miss_A / Miss_B from the stored delay quantile table, so
   other T, other L and other D need no re-run (section 1.3.1).
-* Student-t confidence interval over replications (section 1.6).
+* Student-t confidence interval over replications and Wilson upper bounds for
+  boundary proportions (section 1.6).
 
 Time handling: inputs are float seconds (OMNeT++ vector values); they are rounded
 to integer picoseconds (OMNeT++'s default simtime resolution) so that the ceiling
 and the non-strict boundary are exact, with no floating-point surprises.
 
-Not implemented on purpose (still open): the twin's TTL constants (Orders/DDS
-discard counts), the L = D vs L = T decision for State, drop-signal mapping
-from INET (checklist C8).
+The simulator owns TTL accounting and INET drop-signal classification; this
+module applies the same outcome definitions to Stage-1 packet tables.
 """
 from __future__ import annotations
 
@@ -35,8 +35,10 @@ PS_PER_MS = 10**9
 
 CLASSES = ("orders", "dds", "state", "telemetry")
 D_SPECTRUM_MS = (1, 2, 5, 10, 20, 50, 100)                       # decisions.md section 1.7
-QUANTILE_LEVELS = (0.0, 0.01, 0.05, 0.10, 0.25, 0.50, 0.75, 0.90,
-                   0.95, 0.97, 0.98, 0.99, 0.995, 0.999, 1.0)    # section 5.3 (15 fixed levels)
+QUANTILE_LEVELS = (0.000, 0.010, 0.020, 0.050, 0.100, 0.150, 0.200, 0.250,
+                   0.300, 0.400, 0.500, 0.600, 0.700, 0.750, 0.800, 0.850,
+                   0.900, 0.920, 0.950, 0.970, 0.980, 0.990, 0.995, 0.999,
+                   1.000)                                       # section 5.3 (25 fixed levels)
 NOMINAL_D_MS = {"orders": 50, "dds": 5, "state": 50, "telemetry": 100}  # Tier 1 markers (Q2)
 T_PRIMARY_MS = 10                                                 # T_min (Q1, maintainer-confirmed)
 T_OFFLINE_MS = (50, 500)                                          # offline sensitivity
@@ -234,3 +236,19 @@ def student_t_halfwidth(values: Sequence[float], confidence: float = 0.95) -> fl
         return float("nan")
     s = float(x.std(ddof=1))
     return float(stats.t.ppf(0.5 + confidence / 2.0, n - 1) * s / math.sqrt(n))
+
+
+def wilson_upper(successes: int, trials: int, confidence: float = 0.95) -> float:
+    """Upper endpoint of the two-sided Wilson score interval.
+
+    In particular, a zero observed miss rate remains distinguishable from a
+    proven zero: for ``successes == 0`` this is ``z² / (n + z²)``.
+    """
+    if trials <= 0 or successes < 0 or successes > trials:
+        return float("nan")
+    z = float(stats.norm.ppf(0.5 + confidence / 2.0))
+    p = successes / trials
+    denominator = 1.0 + z * z / trials
+    centre = p + z * z / (2.0 * trials)
+    radius = z * math.sqrt(p * (1.0 - p) / trials + z * z / (4.0 * trials * trials))
+    return min(1.0, (centre + radius) / denominator)

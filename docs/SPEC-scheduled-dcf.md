@@ -1,80 +1,63 @@
-# Implementation Specification: ScheduledDcf (Spike S1 / Checklist C6)
+# ScheduledDcf specification
 
-**Document Reference:** `docs/SPEC-scheduled-dcf.md`  
-**Target Module:** `src/ScheduledDcf.ned`, `src/ScheduledDcf.h`, `src/ScheduledDcf.cc`  
-**Applies to:** Cells 2, 4, 6 (`[Config Radio_Sched]`)  
-**Revision:** Oct 15, 2026 (Verified & Locked Specification)
+`ScheduledDcf` is an idealized conflict-free access regime built on INET's
+non-QoS DCF. It retains PHY framing, DIFS/SIFS, ACKs, and transmission time but
+sets contention windows to zero and permits a request only inside an assigned
+interval with enough time remaining for a complete exchange.
 
----
+All cycle and slot arithmetic uses `SimTime::raw()` integers. Floating-point
+modulo is forbidden.
 
-## 1. Objective & Scope
+The network parameter `wirelessPhyRate` is the single source of truth for the
+scheduled slot geometry. The `Point` and `Sweep` configurations bind both it
+and every WLAN bitrate to the same `phyRate` iteration variable. Ad-hoc runs
+that override the WLAN bitrate must override `*.wirelessPhyRate` as well; the
+acceptance script does this and verifies the resolved slot parameters.
 
-Implement `ScheduledDcf` in C++/NED as a drop-in subclass of `inet::ieee80211::Dcf` (`module ScheduledDcf extends Dcf`) for Cells 2, 4, and 6 (`[Config Radio_Sched]`). The module enforces conflict-free Time-Division Multiple Access (TDMA) slot gating while preserving identical IEEE 802.11g ERP-OFDM framing, physical preamble ($20\ \mu\text{s}$), SIFS ($10\ \mu\text{s}$), ACK exchange, and signal extensions ($2 \times 6\ \mu\text{s}$) as `[Config Radio_CSMA]`.
+## Parameters
 
----
+| Parameter | Meaning |
+| --- | --- |
+| `slotStartOffset` | first assigned start within the superframe |
+| `slotStrideTime` | distance between starts assigned to the same node |
+| `numAssignedSlots` | one for an AMR; multiple contiguous slots for the AP |
+| `slotDuration` | duration of this node's slot type |
+| `requiredExchangeTime` | calibrated minimum complete frame exchange |
+| `superframeDuration` | common cycle, including any padding |
+| `cyclePhaseOffset` | phase relative to simulation time zero |
 
-## 2. Dynamic Superframe Parameterization ($N \in \{5, 10, 20, 40, 80\}$ & PHY $\in \{54, 12\}\text{ Mbps}$)
+Initialization fails if the required exchange exceeds the slot or the last
+assigned interval exceeds the superframe.
 
-In accordance with `docs/capacity.md` §1 and `docs/results.md` §1, a single exchange with $\text{CW} = 0$ takes $258.13\ \mu\text{s}$ (State, $1000\text{ B}$, including DIFS) at $54\text{ Mbps}$ and $814.13\ \mu\text{s}$ at $12\text{ Mbps}$. To prevent slot-boundary overruns and maintain synchronization with the $1\text{ ms}$ wired TAS GCL cycle, `slotDuration` is set to **$400\ \mu\text{s}$ at $54\text{ Mbps}$** (`requiredExchangeTime = 260us`) and **$1000\ \mu\text{s}$ ($1.0\text{ ms}$) at $12\text{ Mbps}$** (`requiredExchangeTime = 820us`):
+## Locked allocation
 
-| Fleet Size $N$ | AMR Uplink Slots | AP Downlink Slots | Total Slots ($S_{\text{total}}$) | $T_{\text{super}}$ @ 54 Mbps ($400\ \mu\text{s}$/slot, padded to $1\text{ ms}$) | $T_{\text{super}}$ @ 12 Mbps ($1000\ \mu\text{s}$/slot) | Mean State Slot Wait @ 54 Mbps | Max State Wait @ 54 Mbps |
-| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **5** | 5 | 1 | 6 | $3.0\text{ ms}$ ($7\text{ slots}$) | $6.0\text{ ms}$ | $1.5\text{ ms}$ | $3.0\text{ ms}$ |
-| **10** | 10 | 1 | 11 | $5.0\text{ ms}$ ($12\text{ slots}$) | $11.0\text{ ms}$ | $2.5\text{ ms}$ | $5.0\text{ ms}$ |
-| **20** | 20 | 2 | 22 | $9.0\text{ ms}$ ($22\text{ slots}$) | $22.0\text{ ms}$ | $4.5\text{ ms}$ | $9.0\text{ ms}$ |
-| **40** | 40 | 8 | 48 | $20.0\text{ ms}$ ($50\text{ slots}$) | $48.0\text{ ms}$ | $10.0\text{ ms}$ | $20.0\text{ ms}$ |
-| **80** | 80 | 39 | 119 | $48.0\text{ ms}$ ($120\text{ slots}$) | $119.0\text{ ms}$ | $24.0\text{ ms}$ | $48.0\text{ ms}$ |
+At 54 Mbps, both directions use 400 µs slots. State requires 260 µs and Orders
+200 µs. AP slot counts are 1, 1, 2, 8, and 39; superframes are 3, 5, 9, 20,
+and 48 ms for N=5, 10, 20, 40, and 80.
 
----
+At 12 Mbps, State uses 850 µs slots with an 820 µs requirement and Orders uses
+560 µs slots with a 550 µs requirement. The N=80 cycle is no longer than
+the 90 ms minimum State interarrival, preventing per-AMR two-packet accumulation.
+The allocation is:
 
-## 3. Wireless-to-Wired TAS Phase Alignment Law (Checklist C6)
+| N | AMR slots | AP slots | occupied time | superframe | State service | Orders service |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 5 | 5 | 1 | 4.81 ms | 6 ms | 166.7/s per AMR | 166.7/s |
+| 10 | 10 | 1 | 9.06 ms | 10 ms | 100/s per AMR | 100/s |
+| 20 | 20 | 3 | 18.68 ms | 20 ms | 50/s per AMR | 150/s |
+| 40 | 40 | 10 | 39.60 ms | 42 ms | 23.8/s per AMR | 238.1/s |
+| 80 | 80 | 39 | 89.84 ms | 90 ms | 11.11/s per AMR | 433.3/s |
 
-For an AMR uplink `State` frame ($1070\text{ B}$ tagged on the wire, serialization time $t_{\text{wire\_tx}} = 85.6\ \mu\text{s}$ at $100\text{ Mbps}$) to pass through the `tsnSwitch -> fms` `TC 1` gate window $[300, 500)\ \mu\text{s}$ with **zero gate-waiting delay**, the frame must arrive completely at the switch egress queue before the implicit guard band cutoff $500\ \mu\text{s} - 85.6\ \mu\text{s} = 414.4\ \mu\text{s}$:
+The offered rates are 10 State/s per AMR and `5N` Orders/s. Thus every point
+has service at or above offered load; the N=80, 12 Mbps point is intentionally
+the tight stress case.
 
-$$t_{\text{switch\_arrival}} = \left(t_{\text{slot\_start}} + \phi_{\text{sched}} + t_{\text{air\_data}} + t_{\text{AP\_bridge}} + t_{\text{wire\_AP\_to\_SW}}\right) \bmod 1000\ \mu\text{s} \in [300,\, 414.4)\ \mu\text{s}$$
+## Acceptance gates
 
----
-
-## 4. C++ Class & 64-Bit Fixed-Point State Machine (`src/ScheduledDcf.ned` / `.h` / `.cc`)
-
-### 4.1 NED Declaration (`src/ScheduledDcf.ned`)
-
-Because INET 4.7.0 defines `Dcf` as a compound `module` containing `channelAccess` (`Dcaf`), `ScheduledDcf` is declared with `module ScheduledDcf extends Dcf`:
-
-```ned
-import inet.linklayer.ieee80211.mac.coordinationfunction.Dcf;
-
-module ScheduledDcf extends Dcf
-{
-    parameters:
-        @class(inet::ieee80211::ScheduledDcf);
-        int slotIndex = default(0);
-        int slotStride = default(1);
-        int numAssignedSlots = default(1);
-        double slotDuration @unit(s) = default(400us);
-        double superframeDuration @unit(s) = default(5ms);
-        double cyclePhaseOffset @unit(s) = default(0us);
-        double requiredExchangeTime @unit(s) = default(260us);
-}
-```
-
-### 4.2 Mandatory 64-Bit Fixed-Point Integer Timing (`simtime_t::raw()`)
-
-1. **IEEE 754 Modulo Prohibition:** Floating-point `std::fmod(0.1, 0.02)` evaluates to `0.01999999999999998`, misclassifying slot 0 as the end of the superframe (`docs/results.md` §3.3).
-2. **Exact Integer Implementation:** Both `isWithinActiveSlot(simtime_t now)` and `computeNextSlotStart(simtime_t now)` operate exclusively on 64-bit signed integer raw ticks (`int64_t`):
-```cpp
-int64_t deltaRaw = (now.raw() - cyclePhaseOffset.raw()) % superframeDuration.raw();
-if (deltaRaw < 0) deltaRaw += superframeDuration.raw();
-```
-3. **Core Method Overrides:**
-   - `processUpperFrame(Packet *packet, const Ptr<const Ieee80211DataOrMgmtHeader>& header)`: If `isWithinActiveSlot(simTime())` is true, delegates to `Dcf::processUpperFrame`; otherwise enqueues packet into `channelAccess->getPendingQueue()` without requesting the channel and schedules `slotStartTimer`.
-   - `channelGranted(IChannelAccess *grantedAccess)`: If `!isWithinActiveSlot(simTime())`, releases the channel via `channelAccess->releaseChannel(this)` and arms `slotStartTimer`.
-   - `frameSequenceFinished()`: Emits `frameSequenceFinishedSignal`, releases the channel, and either requests the channel immediately (if another frame is pending and still within the active slot) or schedules `slotStartTimer` for the next superframe.
-
----
-
-## 5. Acceptance Criteria (Checklist C6)
-
-1. **Zero Collisions:** At $N = 40$ and $N = 80$, `packetSentToPeerWithRetry == 0` and `packetDropRetryLimitReached == 0` across all wireless interfaces.
-2. **Airtime Parity:** In a 1-AMR unloaded test, the `State` frame sequence duration in `Radio_Sched` equals the analytical $\text{CW} = 0$ duration ($258\ \mu\text{s}$ at $54\text{ Mbps}$; $814\ \mu\text{s}$ at $12\text{ Mbps}$) within $2\%$.
-3. **Bounded Admission Wait:** Maximum wireless MAC queuing delay for `State` under unsaturated arrival is strictly bounded by $T_{\text{super}}$.
+- Exact retry and retry-limit *count* scalars are present and zero in scheduled
+  cells, while the CSMA control has traffic and retry activity.
+- `packetSentToPeer:count` is nonzero; byte-sum siblings must never be added to
+  a frame count.
+- Maximum State delay satisfies the configured superframe bound plus the stated
+  wired margin; the N=80 cycle must not exceed the 90 ms minimum interarrival.
+- The N=80, 12 Mbps cell completes without persistent scheduled backlog.

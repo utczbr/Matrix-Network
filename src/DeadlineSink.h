@@ -14,6 +14,8 @@
 #include "inet/queueing/sink/PassivePacketSink.h"
 
 namespace inet {
+class ExperimentCoordinator;
+class ExperimentPacketTag;
 namespace queueing {
 
 class INET_API DeadlineSink : public PassivePacketSink
@@ -50,9 +52,7 @@ class INET_API DeadlineSink : public PassivePacketSink
     bool isZohFlow = true;
     simtime_t warmupTime = SIMTIME_ZERO;
     simtime_t simTimeLimit = SIMTIME_ZERO;
-    bool randomizeTickPhase = true;
-    simtime_t fixedTickPhase = SIMTIME_ZERO;
-    int phaseRngIndex = 1;
+    ExperimentCoordinator *experimentCoordinator = nullptr;
 
     // Precomputed 64-bit raw SimTime constants for exact integer grid evaluation
     std::array<int64_t, NUM_DEADLINES> deadlineRaw = {};
@@ -69,6 +69,7 @@ class INET_API DeadlineSink : public PassivePacketSink
     long nLateNominalA = 0;
     long nLateNominalB = 0;
     long nLateDiscardedTtl = 0;
+    long nDomainBreakdownValid = 0;
 
     // Continuous Definition A counters across D_k
     std::array<long, NUM_DEADLINES> missCountA = {};
@@ -101,7 +102,7 @@ class INET_API DeadlineSink : public PassivePacketSink
     static simtime_t extractCreationTime(const Packet *packet);
 
     // Decomposes end-to-end delay into wireless, switch queue/gate, and wire tx/prop segments
-    virtual void recordDomainBreakdown(const Packet *packet, double e2eDelaySec);
+    virtual void recordDomainBreakdown(const Packet *packet, simtime_t generationTime, simtime_t arrivalTime);
 
   public:
     DeadlineSink() = default;

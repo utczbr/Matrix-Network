@@ -49,7 +49,7 @@ def test_schema_columns_and_row_counts(tables):
     assert list(summary.columns) == ex.SUMMARY_COLUMNS
     assert list(ecdf.columns) == ex.ECDF_COLUMNS
     assert len(summary) == 2 * 2 * len(NS) * len(LAMS)
-    assert (ecdf.groupby(ex.KEY).size() == 15).all()
+    assert (ecdf.groupby(ex.KEY).size() == 25).all()
     assert sorted(ecdf["quantile_level"].unique()) == list(dm.QUANTILE_LEVELS)
     assert (summary["schema_version"] == ex.SCHEMA_VERSION).all()
 
@@ -89,7 +89,8 @@ def test_ecdf_is_non_decreasing_and_percentiles_match(tables):
 
 def test_tail_flag(tables):
     _, summary, _ = tables
-    assert summary["insufficient_tail_samples"].all()          # 3 x ~4000 delivered < 1e5
+    assert (summary["flag_p99"] == "OK").all()
+    assert (summary["flag_p99_9"] == "INSUFFICIENT_TAIL_SAMPLES").all()
 
 
 def test_phase_is_shared_across_cells_for_paired_comparison(tables):
@@ -102,12 +103,12 @@ def test_write_tables_csv_json_mirror(tables, tmp_path):
     _, summary, ecdf = tables
     ex.write_tables(summary, ecdf, tmp_path)
     s_csv = pd.read_csv(tmp_path / "lookup_summary.csv")
-    assert set(s_csv["insufficient_tail_samples"]) == {True}   # parsed back from lowercase "true"
-    assert "true" in (tmp_path / "lookup_summary.csv").read_text().splitlines()[1]
+    assert set(s_csv["flag_p99"]) == {"OK"}
+    assert set(s_csv["flag_p99_9"]) == {"INSUFFICIENT_TAIL_SAMPLES"}
     s_json = json.loads((tmp_path / "lookup_summary.json").read_text())
     e_json = json.loads((tmp_path / "lookup_ecdf.json").read_text())
     assert len(s_json) == len(summary) and len(e_json) == len(ecdf)
-    assert s_json[0]["insufficient_tail_samples"] is True
+    assert s_json[0]["flag_p99_9"] == "INSUFFICIENT_TAIL_SAMPLES"
     e_csv = pd.read_csv(tmp_path / "lookup_ecdf.csv")
     assert np.allclose(e_csv["delay_ms"], ecdf["delay_ms"])
 
@@ -173,4 +174,4 @@ def test_cli_sample_prototype(tmp_path):
     ex.main(["--packets", str(csv), "--out-dir", str(tmp_path / "out"), "--sample", "1,10,74.7,54"])
     s = pd.read_csv(tmp_path / "out" / "lookup_summary.csv")
     e = pd.read_csv(tmp_path / "out" / "lookup_ecdf.csv")
-    assert len(s) == 1 and len(e) == 15
+    assert len(s) == 1 and len(e) == 25

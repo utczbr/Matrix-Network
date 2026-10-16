@@ -10,10 +10,10 @@ module ScheduledDcf extends Dcf
 {
     parameters:
         @class(inet::ieee80211::ScheduledDcf);
-        int slotIndex = default(0);                        // 0..N-1 for AMRs; N for AP start slot
-        int slotStride = default(1);                       // Contiguous (1) or interleaved stride for multi-slot nodes
-        int numAssignedSlots = default(1);                 // 1 for AMR; 1, 2, 8, or 39 for AP downlink
-        double slotDuration @unit(s) = default(400us);     // 400us @ 54Mbps, 1000us @ 12Mbps
+        int numAssignedSlots = default(1);                 // one AMR slot or multiple AP downlink slots
+        double slotStartOffset @unit(s) = default(0us);    // first slot start within the superframe
+        double slotStrideTime @unit(s) = default(400us);   // distance between this node's slot starts
+        double slotDuration @unit(s) = default(400us);     // may differ for State uplink and Orders downlink
         double superframeDuration @unit(s) = default(5ms); // Integer multiple of 1ms TAS cycle
         double cyclePhaseOffset @unit(s) = default(0us);   // Phase offset relative to wired TAS GCL
         double requiredExchangeTime @unit(s) = default(260us); // 258us @ 54Mbps, 814us @ 12Mbps

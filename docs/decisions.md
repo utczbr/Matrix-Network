@@ -1,6 +1,6 @@
 # Matrix Factory Twin: Architectural Decisions & Questions Log
 
-**Revision:** Oct 14, 2026 (Q1–Q8 closure: maintainer ground truth for the NER engine, two-tier deadline framework, lookup-table schema and 24-quantile interpolation rules, open-loop UDP lock, VDA 5050 sizing, Option 7B DDS routing, and 2-level PHY rate sweep). Previous revision: Oct 13, 2026 (comprehensive reference update with citations, normative standards, and analytical derivations). All architectural and experimental questions Q1–Q8 are formally locked.
+**Revision:** Oct 15, 2026. Campaign-readiness repair synchronizes the 25-level quantile contract, full packet ledger, global tick phases, serviceable 12 Mbps schedule, and a 22-replication floor pending the repaired pilot.
 
 ### Status Vocabulary
 * **Decision**: Adopted in the model, validated analytically, awaiting experimental simulation test.
@@ -16,13 +16,13 @@
 1. **Q1 closed (maintainer ground truth):** The twin runs a variable-step conservative NER engine with a finest simulated quantum $T_{\min} = \text{MIN\_DT} = 10\ \text{ms}$ and a macro step $\text{MAX\_DT} = 1000\ \text{ms}$. The consumption rule $c = \lceil (g + L_c)/T \rceil \cdot T$ and the non-strict boundary $a \le c$ are confirmed. The clock never stalls on a late packet. `TICK_QUORUM_TIMEOUT_MS = 10` is a wall-clock thread barrier, not a simulated tick (§1.1, §1.3, new §1.3.1).
 2. **Late-arrival semantics are class-dependent (new §1.3.1):** State and Telemetry follow Zero-Order Hold (stale snapshot reused, late update consumed at $c' = \lceil a/T \rceil \cdot T$); Orders and DDS are consumed late while $a \le g + \text{TTL}$ and discarded (equivalent to a drop) beyond the TTL. Added the discrete staleness measure $\Delta k_{\text{stale}}$ and the counting rule that separates physical loss from late arrival (§1.5 item 6).
 3. **Open note (new §1.3.2):** The maintainers describe $L_c = T$ for State/Telemetry freshness deadlines, while this log's working choice is $L_c = D_c$ for all classes. Both variants are computed offline from the stored eCDF; confirmation requested.
-4. **Q2 decided (two-tier deadline framework, §1.7):** Tier 1 keeps the normative industrial budgets as indicator markers on continuous Miss-vs-$D$ curves; Tier 2 records the twin's own watchdog TTLs ($\text{TTL}^{\text{app}}_c$) separately. The standard deadline spectrum is extended with $D = 100\ \text{ms}$ (Telemetry marker). The numeric TTL constants are still requested from the maintainers.
-5. **Q3 decided (maintainers aligned):** Two-table export (`lookup_summary`, `lookup_ecdf`) in tidy CSV plus JSON mirror; quantile-space (horizontal) interpolation with monotone PCHIP; clamping without extrapolation; stochastic inverse-transform consumption with per-flow seeded PRNGs (§5.3–§5.5). Quantile grid locked to the explicit 24-level list.
+4. **Q2 decided (two-tier deadline framework, §1.7):** Tier 1 keeps the normative industrial budgets as markers. The experiment explicitly uses TTL=50 ms for Orders and TTL=5 ms for DDS, equal to their nominal deadlines. These are modeling surrogates, not claims about the twin's still-external protocol constants.
+5. **Q3 decided (maintainers aligned):** Three exports (`lookup_summary`, `lookup_ecdf`, `lookup_replications`); quantile-space interpolation with monotone PCHIP; clamping without extrapolation; stochastic inverse-transform consumption with per-flow seeded PRNGs (§5.3–§5.5). Quantile grid contains the 25 explicitly listed levels.
 6. **Q4 decided:** Open-loop UDP for all classes and all six cells, with the framing-overhead bound and the threat-to-validity statement documented (§2 Q4 dossier, §3, §6).
 7. **Corrections to the working-session text:** (a) the "24-point" and "≥ 20 points" quantile statements were inconsistent with the explicit level list and are superseded (§5.3); (b) the TCP-vs-UDP overhead is 12 to 24 B, i.e. 1.1 to 2.2 % of a State frame, not only 1.1 %; the claim that GCL frame ceilings are unaffected holds for State and Orders but not for a hypothetical TCP-framed DDS flow (DDS is natively UDP, so it is not affected in the model) (§6); (c) literature citations that could not be verified were not adopted (§8).
 8. **Q5 decided (approved Oct 14):** Controlled scale model kept: 4 stations, $100\ \text{Mbps}$ backbone, one 802.11g cell at $54\ \text{Mbps}$. The AMR fleet sweep is extended to $N \in \{5, 10, 20, 40, 80\}$. The $200\ \text{m} \times 200\ \text{m}$ hall, central AP and stationary AMRs within $\pm 30\ \text{m}$ (maximum $42.43\ \text{m}$ from the AP) are kept, with a dedicated spatial RNG stream (§2 Q5 dossier, §3, §6).
 9. **Correction to the Q5 working-session text:** it quoted the offered wired load at $N = 40$ as $\{23.9, 81.8, 160.2\}\ \text{Mbps}$. The $23.9\ \text{Mbps}$ value is the $N = 5$ figure; at $N = 40$ it is $26.9\ \text{Mbps}$ ($\rho \approx 0.27$, not $0.24$), per `capacity.md` §4 (§6). Also, $N = 80$ reaches only $37\,\%$ wireless utilization at $54\ \text{Mbps}$, so strong CSMA contention still depends on the PHY-rate sensitivity of Q8.
-10. **Q6–Q8 fully locked (Oct 14):** Q6 locked to realistic VDA 5050 message sizes (State 1000 B, Orders 600 B). Q7 locked to Option 7B DDS routing (`station[*] -> fms:5100` at 100 Hz +/- 5% jitter). Q8 locked to 2-level PHY rate sweep (54 Mbps and 12 Mbps) with 10 repetitions per point.
+10. **Q6–Q8 fully locked (Oct 14; replication amendment Oct 15):** Q6 locks State 1000 B and Orders 600 B. Q7 locks Option 7B DDS routing. Q8 locks 54/12 Mbps; the campaign floor is 22 repetitions per point and must be raised if the repaired primary-miss pilot requires it.
 
 ---
 
@@ -48,7 +48,7 @@
 * $L_c \in \mathbb{R}$: Application-layer lead time offset for traffic class $c$.
 * $\text{delay} = a - g$: End-to-end network latency ($\text{delay} = \infty$ for undelivered packets).
 * $c \in \{k \cdot T \mid k \in \mathbb{N}\}$: Scheduled discrete consumption instant within the digital twin execution engine.
-* $\text{TTL}_c \in \mathbb{R}^+$: Protocol watchdog/time-to-live enforced by the twin's `TimerArtifact` for control and coordination transactions (Orders, DDS). Numeric constants are requested from the maintainers (Q2, §2).
+* $\text{TTL}_c \in \mathbb{R}^+$: Experiment watchdog for Orders/DDS, fixed at 50/5 ms. The sink tests the direct condition $a > g + \text{TTL}_c$; it does not round TTL to a tick.
 * $\Delta k_{\text{stale}} \in \mathbb{N}$: Discrete staleness (excess Age of Information, in ticks) of a delivered State/Telemetry packet: $\max\big(0, \lceil a/T \rceil - \lceil (g + L_c)/T \rceil\big)$.
 
 ---
@@ -121,7 +121,7 @@ $$P(\text{Miss}_B(T)) = \frac{1}{T}\int_0^T P(\text{delay} > L_c + x)\,dx.$$
 | Traffic class | Late behaviour in the twin | Mechanism | Metric treatment |
 | :--- | :--- | :--- | :--- |
 | **State** (VDA 5050, AMR → FMS) and **Telemetry** (OPC UA/MQTT, Station → FMS) | **Zero-Order Hold.** Tick $c$ reuses the previous snapshot; the delayed update takes effect at $c' = \lceil a/T \rceil \cdot T$ unless a newer sample overwrites it. | `assembleTelemetryFrame()` reads volatile snapshots (`MainSimulator.java:301-420`) | $\text{Miss}_B = 1$ at tick $c$; graded staleness $\Delta k_{\text{stale}}$ for surviving packets. |
-| **Orders** (VDA 5050, FMS → AMR) and **DDS** (Station → Station) | **Delayed consumption** at the first tick $c' \ge a$ while $a \le g + \text{TTL}$; **discarded** (KILL, identical to a drop) once $a > g + \text{TTL}$. | Pending `nerRegistry` entries; `TimerArtifact.evaluateTTLs()` (`MainSimulator.java:274`); `cancelTransport` (`AMRArtifact.java:234`); `recordWatchdogFired` (`DatabaseArtifact.java:181`) | $\text{Miss}_B = 1$ at tick $c$; functional discard rate $P(\text{delay} > \text{TTL}_c)$ evaluated offline from the eCDF once the TTL constants are known. |
+| **Orders** (VDA 5050, FMS → AMR) and **DDS** (Station → FMS) | **Delayed consumption** while $a \le g + \text{TTL}$; discarded once $a > g + \text{TTL}$. | Experiment surrogates: Orders 50 ms, DDS 5 ms. | $\text{Miss}_B = 1$ at tick $c$; TTL discard is recorded separately and uses the direct arrival comparison. |
 
 The code distinguishes two meanings of $D_c$: for control/coordination packets it is the protocol timeout ($c = \lceil (g + D_c)/T \rceil \cdot T$, late packets killed by the watchdog); for periodic state/telemetry it is a freshness deadline (see the open note in §1.3.2).
 
@@ -160,13 +160,14 @@ To guarantee statistical integrity without sampling bias:
 3. **Causal Loss Attribution Schema (Mutually Exclusive & Exhaustive):**
    Every generated packet surviving the warmup and horizon filters must be accounted for in exactly one category:
    * `On_Time`: Delivered with $a \le c$ (Definition B) or $a - g \le D_c$ (Definition A).
-   * `Late_Arrival`: Delivered successfully, but $a > c$ (Definition B) or $a - g > D_c$ (Definition A). Packets with $c \le t_{\text{sim-limit}}$ that remain in-flight at simulation termination are classified here.
+   * `Late_Arrival`: Delivered successfully, but $a > c$ (Definition B) or $a - g > D_c$ (Definition A).
+   * `Late_Termination`: Valid generation still pending at simulation termination. It is a miss, but not physical loss.
    * `Drop_Queue`: Discarded at switch, access point, or host network interfaces due to buffer overflow (`packetDropQueueOverflow`).
    * `Drop_Retry`: Discarded at wireless MAC layer due to IEEE 802.11 retry counter exhaustion (`packetDropRetryLimitReached`).
    * `Drop_Other`: Discarded due to physical layer corruption, bit errors, or interface down events (`packetDrop`). Expected to be zero under the baseline error-free channel scope.
 4. **Fundamental Conservation Law:**
    For every simulation run, traffic class, and experimental configuration, the total generated packet volume must satisfy:
-   $$n_{\text{valid}} = n_{\text{On\_Time}} + n_{\text{Late\_Arrival}} + n_{\text{Drop\_Queue}} + n_{\text{Drop\_Retry}} + n_{\text{Drop\_Other}}$$
+   $$n_{\text{generated,valid}} = n_{\text{On\_Time}} + n_{\text{Late\_Arrival}} + n_{\text{Drop\_Queue}} + n_{\text{Drop\_Retry}} + n_{\text{Drop\_Other}} + n_{\text{Late\_Termination}}$$
    Any deviation indicates an unmapped INET signal or telemetry leakage.
 5. **Telemetry Traffic Exclusion:** Station background telemetry ($1400\ \text{B}$ frames) represents unprioritized Best Effort coexistence load. In TAS configurations (Cells 5 and 6), telemetry is intentionally throttled by the GCL gate schedule ($500\ \mu\text{s}$ open window per $1\ \text{ms}$ cycle). Telemetry is excluded from the primary deadline miss metric and analyzed in a secondary backbone saturation and throughput panel.
 6. **Loss vs. Late-Arrival Separation (Q1):** Physical drops ($p_{\text{loss}} = \text{Drop\_Queue} + \text{Drop\_Retry} + \text{Drop\_Other}$, i.e. $a = \infty$) are always kept separate from delivered-but-late packets (`Late_Arrival`). Because `Late_Arrival` depends on $D_c$, it is derived as $\text{miss\_A}_D - p_{\text{loss}}$ rather than stored as a separate column. This separation lets the twin apply KILL (Orders/DDS beyond TTL) or ZOH (State/Telemetry) without modifying the lookup table. Telemetry is excluded from the primary metric but is reported in the secondary panel with $D_{\text{tel}} = 100\ \text{ms}$.
@@ -179,20 +180,20 @@ To guarantee statistical integrity without sampling bias:
   $$\bar{p} = \frac{1}{R} \sum_{r=1}^R \hat{p}_r, \qquad H = t_{1 - \alpha/2,\, R-1} \cdot \frac{s}{\sqrt{R}}, \qquad s = \sqrt{\frac{1}{R-1}\sum_{r=1}^R (\hat{p}_r - \bar{p})^2}$$
 * **Wilson Score Bound for Zero-Miss Regimes:** When all replications yield zero misses ($\sum k_r = 0$), the Student-$t$ variance is degenerate ($s = 0$). In this boundary case, report an approximate $95\%$ upper confidence bound using the Wilson score interval on pooled packets (equivalent to the classical Rule of Three, $3/n_{\text{pooled}}$):
   $$p_{\text{upper}} = \frac{z^2}{n_{\text{pooled}} + z^2} \approx \frac{1.96^2}{n_{\text{pooled}} + 3.84}$$
-* **Sample Size Matrix (55 s Measured Window, $R = 10$ Replications):**
+* **Sample Size Matrix (55 s Measured Window, $R = 22$ Replications):**
 
 | Fleet Size $N$ | State Pkts/Run | State Pooled ($n$) | Wilson 95% Bound ($k=0$) | Orders Pkts/Run | Orders Pooled ($n$) | Wilson 95% Bound ($k=0$) |
 | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **5 AMRs** | 2,750 | 27,500 | $1.40 \times 10^{-4}$ | 1,375 | 13,750 | $2.79 \times 10^{-4}$ |
-| **10 AMRs**| 5,500 | 55,000 | $6.98 \times 10^{-5}$ | 2,750 | 27,500 | $1.40 \times 10^{-4}$ |
-| **20 AMRs**| 11,000| 110,000| $3.49 \times 10^{-5}$ | 5,500 | 55,000 | $6.98 \times 10^{-5}$ |
-| **40 AMRs**| 22,000| 220,000| $1.75 \times 10^{-5}$ | 11,000| 110,000| $3.49 \times 10^{-5}$ |
-| **80 AMRs**| 44,000| 440,000| $8.73 \times 10^{-6}$ | 22,000| 220,000| $1.75 \times 10^{-5}$ |
+| **5 AMRs** | 2,750 | 60,500 | $6.35 \times 10^{-5}$ | 1,375 | 30,250 | $1.27 \times 10^{-4}$ |
+| **10 AMRs**| 5,500 | 121,000 | $3.18 \times 10^{-5}$ | 2,750 | 60,500 | $6.35 \times 10^{-5}$ |
+| **20 AMRs**| 11,000| 242,000 | $1.59 \times 10^{-5}$ | 5,500 | 121,000 | $3.18 \times 10^{-5}$ |
+| **40 AMRs**| 22,000| 484,000 | $7.94 \times 10^{-6}$ | 11,000| 242,000 | $1.59 \times 10^{-5}$ |
+| **80 AMRs**| 44,000| 968,000 | $3.97 \times 10^{-6}$ | 22,000| 484,000 | $7.94 \times 10^{-6}$ |
 
 * **Tail Percentile Reporting Criteria:**
   * Report $99\text{th}$ percentile ($p_{99}$) latency only when pooled sample size $n \ge 10^4$ (guaranteeing $\ge 100$ samples in the distribution tail).
   * Report $99.9\text{th}$ percentile ($p_{99.9}$) latency only when pooled sample size $n \ge 10^5$ (guaranteeing $\ge 100$ samples in the distribution tail).
-  * If $n < 10^5$, explicitly flag $p_{99.9}$ as "insufficient tail samples" (for example, Orders at $N = 5$ has only $\sim 14$ samples beyond $p_{99.9}$).
+  * If $n < 10^5$, explicitly flag $p_{99.9}$ as "insufficient tail samples" (Orders at $N = 5$ remains below this threshold).
 
 ---
 
@@ -383,16 +384,16 @@ Of the 72 baseline parameter grid points ($6\ \text{cells} \times 4\ N \times 3\
 | **L2 Addressing** | Flat L2 domain with `GlobalArp` enabled | Decision | Flat addressing domain (`10.0.x.x/16`) eliminates initial ARP request/response transients and broadcast storm delays (`assignDisjunctSubnetAddresses = false`). |
 | **Offered Load Parity** | RNG stream isolation: `rng-0` (protocols) vs. `rng-1` (traffic generators) | Decision (to verify) | Guarantees identical packet generation timestamps across all six cells for a given seed. Isolated AMR spatial coordinates to a dedicated stream to prevent MAC DCF interaction (Step 4.4). |
 | **Buffer Sizing Budget** | Total 80 packets across all wired switch configurations | Decision | Enforces strict buffer space parity: FIFO utilizes $1 \times 80$ queue; Priority and TAS utilize $4 \times 20$ queues. Sensitivity to byte capacity (`dataCapacity`) reserved for Phase 9. |
-| **802.1Q Tag Stripping** | `excludeEncapsulationProtocols = ["ieee8021qctag"]` on `tsnSwitch` egress | Decision | Prevents sending 802.1Q tagged frames (EtherType `0x8100`) toward the AP or untagged stations. Frame overhead is 70 B with tag, 66 B without tag. Window capacities are identical (§6). |
+| **802.1Q Tag Path** | Orders is identified/encoded at the FMS, decoded at switch ingress, and excluded from re-encapsulation by `excludeEncapsulationProtocols = ["ieee8021qctag"]`; State/DDS/Telemetry are identified and encoded at the switch toward the TSN-capable FMS. | Decision + runtime smoke test | Preserves PCP 6 for the Orders egress queue without exposing an 802.1Q payload to the ordinary AP WLAN LLC. Frame overhead is 70 B while tagged and 66 B after stripping; window capacities are identical (§6). |
 | **MAC Address Learning** | `RelayInterfaceLearner` enabled on `tsnSwitch` | Decision | INET's `TsnSwitch` disables MAC learning when stream features are active. AMR MACs reside behind the AP bridge and cannot be configured statically; dynamic learning prevents broadcast flooding. |
 | **Stationary AMRs** | `StationaryMobility` in $200\ \text{m} \times 200\ \text{m}$ manufacturing hall | Decision | Excludes spatial fast fading and shadowing transients, isolating MAC channel contention and queuing phenomena (Project Proposal §1 scope [13]). |
 | **Transport Fidelity** | Open-loop UDP across all traffic classes (Q4) | Decision | Preserves offered load as a strictly independent variable across FIFO, Priority, and TAS cells (Jain [9]); avoids TCP head-of-line blocking and RTO masking of drop causes. Framing-overhead bound and threat to validity documented in the Q4 dossier and §6. |
 | **Radio Channel Scope** | Error-free channel by scope: $P_{\text{tx}} = 20\ \text{mW}$, $2.412\ \text{GHz}$, noise floor $-110\ \text{dBm}$ | Proposed | Proposal excludes detailed multipath propagation. Link budget proof at 42.4 m confirms error-free operation. Industrial floor noise ($-95\ \text{dBm}$) retained as optional sensitivity. |
 | **Statistical Unit** | Replication-level mean and Student-$t$ confidence intervals | Proposed | Packets within a run exhibit temporal correlation; replication-level aggregation satisfies statistical independence (Jain, 1991 [9]). Wilson score retained for $k=0$. |
 | **Primary Result Format**| Continuous Miss-vs-Deadline curves ($D \in \{1, 2, 5, 10, 20, 50, 100\}\ \text{ms}$) for Definitions A and B, with the Tier 1 budgets as markers (Q2) | Decision | Resolves metric degeneracy (Finding F1, §1.9) and insulates results from unconfirmed deadline placeholders (Q2). Twin watchdog TTLs are recorded as Tier 2. |
-| **Lookup Table Schema** | Two tidy tables (`lookup_summary`, `lookup_ecdf`) in CSV with JSON mirror (§5); quantile-space interpolation with monotone PCHIP | Decision | Maintainers aligned (Oct 14). Follows Tidy Data principles [12]; PCHIP [11]; Wasserstein quantile interpolation [18, 19]. |
+| **Lookup Table Schema** | Summary and eCDF CSV/JSON plus a per-replication CSV; quantile-space interpolation with monotone PCHIP | Decision | The replication table enables paired six-cell contrasts while the other two remain the twin interface. |
 | **Telemetry Process** | Poisson arrival process (`exponential(${telInterval})`) per station; desynchronized offset | Decision | Poisson arrivals induce queuing bursts at $\rho \approx 0.8$, providing the conservative benchmark for FIFO. Dynamic initial offset `uniform(0s, ${telInterval})` guarantees desynchronization. |
-| **Radio Scheduled Spike**| `ScheduledDcf` with dynamic superframe sizing and MAC TDMA gating (Spike S1) | Open | Replaces static 100 ms superframe with dynamic sizing ($N=5..120$); preserves air-time parity with CSMA while eliminating collisions (Checklist C6). |
+| **Radio Scheduled Regime**| `ScheduledDcf` with explicit offset/stride intervals and direction-specific 12 Mbps slots | Implemented; acceptance passed | Service meets or exceeds offered State and Orders load through N=80. At N=80/12 Mbps, 850 µs State and 560 µs Orders slots form a 90 ms cycle, avoiding the two-packet accumulation observed when the cycle exceeded the minimum State interarrival. Root parameter `wirelessPhyRate` drives this geometry and is bound to the WLAN bitrate by the same `phyRate` factor. Ten-second N=40/54 and N=80/12 runs recorded zero scheduled retries; the matched CSMA control recorded retry activity. |
 | **Tick & Consumption Semantics** | Variable-step NER with $T_{\min} = 10\ \text{ms}$; $c = \lceil (g + L_c)/T \rceil T$; on time iff $a \le c$; no clock stall | Confirmed (maintainer) | `MainSimulator.java:56-57, 260-266, 422-428`. Primary Definition B at $T = 10\ \text{ms}$, offline sensitivity at $50$ and $500\ \text{ms}$ (§1.3.1). |
 | **Late-Arrival Semantics** | State/Telemetry: ZOH and delayed consumption at $\lceil a/T \rceil T$. Orders/DDS: delayed consumption until $g + \text{TTL}$, then discard | Confirmed (maintainer) | `assembleTelemetryFrame()`, `TimerArtifact.evaluateTTLs()`. The table stores $p_{\text{loss}}$ and the finite delay eCDF separately so the twin can apply either rule (§1.5 item 6). |
 | **Lookup Consumption Mode** | Stochastic inverse-transform sampling with a per-flow seeded PRNG; summary (expected-value) mode kept as fallback | Decision | Keeps `SeededReplaySeed1Test` deterministic under multi-threaded agent scheduling (§5.5). |
@@ -458,19 +459,21 @@ Of the 72 baseline parameter grid points ($6\ \text{cells} \times 4\ N \times 3\
 | `N_AMR` | Integer | Active AMR fleet density. |
 | `lambda_tel_Mbps` | Float | Aggregate offered background telemetry load (Mbps payload). |
 | `phy_rate_Mbps` | Integer | Wireless PHY rate factor (baseline 54; sensitivity levels per Q8). |
-| `n_reps` | Integer | Total independent replications executed ($R \ge 10$). |
+| `n_reps` | Integer | Total independent replications executed (locked floor $R=22$). |
 | `n_total` | Integer | Total validated packet count across all replications. |
 | `p_loss` | Float | Aggregate physical drop ratio $(n_{\text{Drop\_Queue}} + n_{\text{Drop\_Retry}} + n_{\text{Drop\_Other}}) / n_{\text{total}}$. Excludes delivered-but-late packets (`Late_Arrival` $= \text{miss\_A}_D - p_{\text{loss}}$). |
 | `n_Drop_Queue` | Integer | Packets dropped due to buffer overflow. |
 | `n_Drop_Retry` | Integer | Packets dropped due to wireless retry limit exhaustion. |
 | `n_Drop_Other` | Integer | Packets dropped due to physical errors or unmapped events. |
+| `n_Late_Termination` | Integer | Valid generations still pending at termination; counted as misses, excluded from `p_loss`. |
 | `miss_A_1ms`..`miss_A_100ms` | Float | Mean deadline miss rate under Definition A for $D \in \{1, 2, 5, 10, 20, 50, 100\}\ \text{ms}$. |
 | `miss_B_1ms`..`miss_B_100ms` | Float | Mean deadline miss rate under Definition B for $D \in \{1, 2, 5, 10, 20, 50, 100\}\ \text{ms}$ ($L=D$, $T = 10\ \text{ms}$). Other $T$ and the $L_c = T$ variant are computed offline from `lookup_ecdf`. |
 | `ci95_miss_B` | Float | 95% Student-$t$ confidence interval half-width of $\text{Miss}_B$ across replications. |
+| `upper95_miss_B` | Float | Wilson upper endpoint for the pooled nominal miss proportion, including the zero-observation boundary. |
 | `lat_p50`, `lat_p90`, `lat_p95` | Float | Delay distribution percentiles in milliseconds. |
 | `lat_p99` | Float | 99th percentile delay (flagged if pooled $n < 10^4$). |
 | `lat_p99_9` | Float | 99.9th percentile delay (flagged if pooled $n < 10^5$). |
-| `insufficient_tail_samples` | Boolean | `true` when pooled $n < 10^4$ for $p_{99}$ or $n < 10^5$ for $p_{99.9}$. |
+| `flag_p99`, `flag_p99_9` | String | Separate adequacy flags at delivered pooled $n=10^4$ and $10^5$. |
 | `schema_version` | String | Schema version tag for the twin's parser. |
 
 ---
@@ -478,9 +481,9 @@ Of the 72 baseline parameter grid points ($6\ \text{cells} \times 4\ N \times 3\
 ### 5.3 Long-Format Empirical CDF Table Schema (`lookup_ecdf.csv` / `.json`)
 Stores the empirical latency quantile function of **delivered** packets ($a < \infty$) for offline interpolation and tick evaluation:
 $$\text{Schema: } (\text{cell},\, \text{class},\, N_{\text{AMR}},\, \lambda_{\text{tel}},\, \text{phy\_rate\_Mbps},\, \text{quantile\_level},\, \text{delay\_ms})$$
-* **Quantile levels (24, fixed):** $\{0.0, 0.01, 0.02, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50, 0.60, 0.70, 0.75, 0.80, 0.85, 0.90, 0.92, 0.95, 0.97, 0.98, 0.99, 0.995, 0.999, 1.0\}$, concentrated in the upper tail.
+* **Quantile levels (25, fixed):** $\{0.0, 0.01, 0.02, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50, 0.60, 0.70, 0.75, 0.80, 0.85, 0.90, 0.92, 0.95, 0.97, 0.98, 0.99, 0.995, 0.999, 1.0\}$, concentrated in the upper tail.
 * Lost packets are excluded from the finite delay quantiles and recorded in `p_loss`.
-* **Locked Resolution (Oct 14):** Formally adopts the 24-point quantile grid for high-fidelity Wasserstein interpolation and tail representation.
+* **Locked Resolution (amended Oct 15):** The explicit list has 25 points and is implemented identically in C++ and Python.
 
 ---
 
@@ -546,11 +549,11 @@ $$\text{Schema: } (\text{cell},\, \text{class},\, N_{\text{AMR}},\, \lambda_{\te
 * [x] `docs/schedule.md`: status block, Stage 0, P1 gate, C7, C3 rows, Gate 1 updated.
 * [x] Implementation Guide: Steps 0.2, 0.3, 5.3 updated; new Step 9.5.
 * [x] Q5: sweep $N \in \{5, 10, 20, 40, 80\}$ propagated to `parameters.md` §3, §3.1, §5; sample-size row for $N = 80$ in §1.6; `checklist_secao3.md` A3, C4; `schedule.md` P1 gate, C6, C9; Implementation Guide Step 9.2.
-* [ ] `simulations/omnetpp.ini`: set the sweep `*.numAmrs = 5, 10, 20, 40, 80` and give AMR coordinates a dedicated RNG stream.
+* [x] `simulations/omnetpp.ini`: fleet sweep and dedicated placement RNG.
 * [ ] Ask the maintainers for the canonical station and AMR counts of the twin.
-* [ ] `analysis/export_lookup.py`: implement 15-level quantile export, quantile-space PCHIP with the non-crossing guard, `schema_version`, `insufficient_tail_samples`.
-* [ ] `simulations/omnetpp.ini` and `DeadlineSink`: add the staleness histogram, the $D = 100\ \text{ms}$ level and the $L_c = T$ variant.
-* [ ] Ask the maintainers: TTL constants (Q2), $L_c$ for State/Telemetry (§1.3.2), preferred ingestion format and resource path (Q3).
+* [x] `analysis/export_lookup.py`: 25 levels, PCHIP/non-crossing guard, schema v2, Wilson bound, and separate tail flags.
+* [x] `simulations/omnetpp.ini` and `DeadlineSink`: staleness histograms, 100 ms deadline, and the $L_c=T$ variant.
+* [ ] Ask maintainers only for the production twin's protocol TTL constants, canonical population, and preferred resource path; the experiment's TTL surrogates are explicit.
 
 ---
 

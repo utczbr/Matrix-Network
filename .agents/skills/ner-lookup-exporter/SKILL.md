@@ -24,7 +24,7 @@ Ensure all deadline thresholds in the lookup table are evaluated over the exact 
 - Compute the horizon cutoff using the largest lead time in the deadline spectrum ($L_{\max} = \max(D_{\text{spectrum}})$) on the primary tick grid ($T_0$):
   $$c_{\text{horizon}} = \phi + \left\lceil \frac{g - \phi + L_{\max}}{T_0} \right\rceil \cdot T_0$$
 - Discard any packet with $c_{\text{horizon}} > t_{\text{sim\_limit}}$. Using $L_{\max}$ across all deadline columns guarantees that every column shares the same packet denominator $n_{\text{total}}$, keeps miss rates strictly monotone with respect to the deadline threshold $D$, and ensures $\text{Late\_Arrival} = \text{miss}_A(D) - p_{\text{loss}} \ge 0$.
-- Assert strict packet conservation ($n_{\text{total}} == n_{\text{delivered}} + n_{\text{Drop\_Queue}} + n_{\text{Drop\_Retry}} + n_{\text{Drop\_Other}}$) before computing rates.
+- Assert strict packet conservation ($n_{\text{generated,valid}} = n_{\text{delivered}} + n_{\text{Drop\_Queue}} + n_{\text{Drop\_Retry}} + n_{\text{Drop\_Other}} + n_{\text{Late\_Termination}}$) before computing rates.
 
 ### 2. Separate Physical Loss from Continuous and Tick-Quantized Misses
 Preserve both binary loss and graded delay information so the consuming twin can apply class-specific late-arrival semantics.
@@ -33,7 +33,7 @@ Preserve both binary loss and graded delay information so the consuming twin can
 - Evaluate **Definition A** (continuous relative deadline): $\text{miss}_A(D) = 1$ if lost ($a = \infty$) or $(a - g) > D$.
 - Evaluate **Definition B** (discrete tick grid): $c = \phi + \lceil(g - \phi + L_c) / T\rceil \cdot T$ with $L_c = D_c$ and non-strict boundary inequality ($a \le c$ is on time; $a > c$ is a miss).
 - Support class-specific late semantics:
-  - **Watchdog / KILL flows** (control and coordination): Packets arriving after the protocol watchdog TTL ($a > c_{\text{TTL}}$) are aborted and discarded by the application.
+  - **Watchdog / KILL flows** (control and coordination): Packets arriving after the direct watchdog boundary ($a > g + \text{TTL}$) are aborted and discarded by the application.
   - **Zero-Order Hold / ZOH flows** (periodic state and telemetry): Late packets cause a miss on tick $c$ (reusing the prior snapshot) and take effect on tick $c' = \phi + \lceil(a - \phi) / T\rceil \cdot T$, incurring discrete tick staleness $\Delta_k = \max(0, \lceil(a - \phi) / T\rceil - \lceil(g - \phi + L_c) / T\rceil)$.
 
 ### 3. Aggregate at the Replication Level
@@ -43,10 +43,10 @@ Treat the independent simulation replication (not the individual packet) as the 
   $$H = t_{0.975, R-1} \cdot \frac{s}{\sqrt{R}}$$
 - When all replications yield zero misses ($\sum k_r = 0$), report the 95% Wilson score upper bound on pooled packets:
   $$p_{\text{upper}} = \frac{3.8416}{n_{\text{pooled}} + 3.8416}$$
-- Set `insufficient_tail_samples = true` whenever the pooled delivered sample count is below $10^4$ for p99 or below $10^5$ for p99.9.
+- Set `flag_p99` and `flag_p99_9` independently from pooled delivered thresholds $10^4$ and $10^5$.
 
 ### 4. Interpolate Horizontally in Quantile Space via Monotone PCHIP
-Export a two-table schema (`lookup_summary` and `lookup_ecdf`) in tidy CSV and mirrored JSON formats.
+Export `lookup_summary`, `lookup_ecdf`, and the paired-seed `lookup_replications` table.
 
 - Store conditional delivery delay quantiles ($a < \infty$) across a fixed, tail-dense quantile vector (e.g., 25 levels from 0.000 to 1.000, including 0.90, 0.95, 0.97, 0.98, 0.99, 0.995, 0.999, 1.000).
 - Never interpolate vertically in CDF probability space (which creates false bimodal mixture distributions between low-delay and high-delay operating points).
