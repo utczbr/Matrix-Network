@@ -8,6 +8,19 @@ interval with enough time remaining for a complete exchange.
 All cycle and slot arithmetic uses `SimTime::raw()` integers. Floating-point
 modulo is forbidden.
 
+## Code map
+
+| Method | Responsibility |
+| --- | --- |
+| `initialize` | Reads slot geometry and rejects nonpositive durations, out-of-frame allocations, or exchanges too long for a slot. |
+| `isWithinActiveSlot` | Maps the current time into the phase-adjusted superframe and checks both slot membership and remaining exchange time. |
+| `computeNextSlotStart` | Finds the earliest assigned slot boundary strictly after the current time, including times before the configured phase offset. |
+| `scheduleNextSlotTimer` / `handleMessage` | Arms the next boundary and requests channel access when queued frames are waiting. |
+| `processUpperFrame` | Sends immediately through DCF when an exchange fits; otherwise queues the frame until its next slot. |
+| `channelGranted` / `frameSequenceFinished` | Releases grants received outside an eligible slot and resumes or defers queued transmissions after each sequence. |
+
+The acceptance checks in `analysis/verify_spike_s1.py` validate resolved slot parameters, successful scheduled traffic, retry counters, and the State delay bound at nominal and stress points.
+
 The network parameter `wirelessPhyRate` is the single source of truth for the
 scheduled slot geometry. The `Point` and `Sweep` configurations bind both it
 and every WLAN bitrate to the same `phyRate` iteration variable. Ad-hoc runs

@@ -94,6 +94,7 @@ def build_tables(packets: pd.DataFrame, base_seed: int = 0,
         pooled = []
 
         reps = sorted(grp["rep"].unique())
+        # Keep miss-rate estimates replication-level; pool only delivered delays for the ECDF.
         for rep in reps:
             rg = grp[grp["rep"] == rep]
             g = rg["g_s"].to_numpy(dtype=float)
@@ -251,6 +252,7 @@ def build_tables_from_sca(sca_dir: Path, strict_conservation: bool = True,
             n_drop_other = int(required(coordinator, f"n_drop_other_{cls}"))
             n_late_termination = int(required(coordinator, f"n_late_termination_{cls}"))
 
+            # Cross-check the coordinator ledger against sink-side receipt and domain counts.
             if strict_conservation:
                 if n_rx_total != n_deliv + n_warmup + n_horizon:
                     raise RuntimeError(
@@ -339,6 +341,7 @@ def build_tables_from_sca(sca_dir: Path, strict_conservation: bool = True,
         drops = n_drop_q + n_drop_r + n_drop_o
         n_total = int(grp["n_generated"].sum())
 
+        # Weight per-run quantiles by valid deliveries when combining replications.
         def weighted_quantile_scalar(level: float) -> float:
             values = grp[f"ecdf_q_{level:.3f}"].to_numpy(dtype=float)
             weights = grp["n_deliv"].to_numpy(dtype=float)
@@ -358,6 +361,7 @@ def build_tables_from_sca(sca_dir: Path, strict_conservation: bool = True,
             n_Late_Termination=n_late_t,
         )
 
+        # Drops and unfinished packets are misses at every deadline, but only drops enter p_loss.
         rep_totals = grp["n_generated"]
         rep_terminal_misses = grp["n_drop_queue"] + grp["n_drop_retry"] + grp["n_drop_other"] + grp["n_late_termination"]
 
@@ -465,6 +469,7 @@ def interpolate(summary: pd.DataFrame, ecdf: pd.DataFrame, *,
         LOG.warning("incomplete grid for cell=%s class=%s phy=%s: result is NaN", cell, cls, phy_rate)
         return {"p_loss": float("nan"), "levels": dm.QUANTILE_LEVELS, "delay_ms": np.full(n_levels, np.nan)}
 
+    # Interpolate each quantile horizontally in load, then vertically in fleet size.
     along_lam = _pchip(lams, cube, lam_q, axis=1)
     vec = _pchip(ns, along_lam, n_q, axis=0)
     delay = np.maximum.accumulate(np.clip(vec[:n_levels], 0.0, None))

@@ -46,6 +46,19 @@ deadline miss but not a physical loss.
 * **1D Wasserstein Geodesic Interpolation:** For each quantile level $q$, interpolate latency across continuous dimensions $N_{\text{AMR}}$ and $\lambda_{\text{tel}}$ using Monotone PCHIP (`scipy.interpolate.PchipInterpolator`), preventing overshoot at the FIFO saturation knee.
 * **Non-Crossing & Clamping Guard:** Enforce monotonicity across quantiles ($Q(q_{k+1}) \ge Q(q_k)$), clip delays to $\ge 0$, and apply nearest-neighbor clamping for post-saturation and out-of-grid requests.
 
+### 1.5 Code map
+
+| File / function | Responsibility |
+| --- | --- |
+| `deadline_metrics.py` | Shared integer-time definitions for misses, the common horizon filter, outcome bins, quantile-based offline evaluation, and confidence intervals. |
+| `export_lookup.read_packets` / `build_tables` | Validate packet-table columns, compute per-replication miss rates, and pool valid delivered delays for Stage 1. |
+| `export_lookup.parse_sca_file` / `build_tables_from_sca` | Parse production scalars, audit coordinator and sink conservation, then aggregate replications for Stage 2. |
+| `export_lookup.write_tables` | Write summary, ECDF, and paired-replication CSV/JSON artifacts. |
+| `export_lookup.interpolate` | Apply saturation/grid clamping, interpolate quantiles and loss, then restore non-crossing quantile order. |
+| `bottleneck_migration.build_contrasts` | Pair six-cell nominal miss rates by replication and calculate wireless and wired effects. |
+
+Stage 1 accepts per-packet observations; Stage 2 accepts campaign scalar files. Both paths produce the same summary and conditional-delay ECDF schemas, while only Stage 2 can use coordinator-persisted pooled quantiles.
+
 ---
 
 ## 2. Deterministic Java Twin Consumption Contract
