@@ -80,7 +80,7 @@ class INET_API DeadlineSink : public PassivePacketSink
     // Maintainer Variant Definition B^T counters (L_c = T_m) across T_m (decisions.md §1.3.2)
     std::array<long, NUM_TICK_PERIODS> missCountBT = {};
 
-    // Histograms & exact delay vector for quantile extraction
+    // Histograms summarize distributions; the vector retains samples for exact pooled quantiles.
     cHistogram e2eDelayHist;
     std::array<cHistogram, NUM_TICK_PERIODS> stalenessTicksHist;
     cHistogram wirelessDomainDelayHist;

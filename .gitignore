@@ -43,7 +43,21 @@ htmlcov/
 *~
 .DS_Store
 
-# Local machine environment overrides (uncommitted)
 analysis/local_config.py
 Makefile.local
 .env
+
+AGENTS.md
+**/AGENTS.md
+AGENT.md
+**/AGENT.md
+.agents/
+**/.agents/
+.agent/
+**/.agent/
+agents/
+**/agents/
+agent/
+**/agent/
+.codex/
+**/.codex/

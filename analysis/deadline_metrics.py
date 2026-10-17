@@ -147,6 +147,7 @@ def outcome_counts(g, a, cause, d_ms: float, *, definition: str = "B",
     if np.any(fin & (cause != "")):
         raise ValueError("a packet cannot be both delivered and dropped")
 
+    # Reject impossible overlaps before assigning packets to mutually exclusive outcomes.
     hz = lead if horizon_lead_ms is None else horizon_lead_ms
     keep = valid_mask(g, hz, tick_ms, phase_ms, warmup_s, sim_limit_s)
     miss = miss_a(g, a, d_ms) if definition == "A" else miss_b(g, a, lead, tick_ms, phase_ms)
@@ -193,7 +194,8 @@ def _cdf_knots(delays_ms: Sequence[float], levels: Sequence[float]):
         raise ValueError("delays and levels must be 1-D arrays of equal, non-zero length")
     if np.any(np.diff(d) < 0) or np.any(np.diff(q) <= 0):
         raise ValueError("quantile table must be non-decreasing in delay and increasing in level")
-    keep = np.append(d[1:] > d[:-1], True)     # right-continuous CDF: keep the largest level per delay
+    # Collapse repeated delays to the largest quantile level for a right-continuous CDF.
+    keep = np.append(d[1:] > d[:-1], True)
     return d[keep], q[keep]
 
 

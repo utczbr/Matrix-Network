@@ -4,6 +4,10 @@ This sheet catalogs every parameter in the simulation model ([simulations/omnetp
 
 **Revision:** Oct 15, 2026. Configuration is synchronized with the campaign-readiness repair; C8 and scheduled-access acceptance pass, while the repaired pilot remains pending.
 
+## Implementation references
+
+The parameter values remain defined in `simulations/omnetpp.ini` and the NED declarations. The implementation roles are documented in [the deadline and accounting specification](SPEC-deadline-sink.md), [the scheduled MAC specification](SPEC-scheduled-dcf.md), and [the lookup exporter specification](SPEC-lookup-ner-integration.md). This distinction keeps this sheet focused on configured values and status.
+
 ### Parameter Status Definitions
 * **Placeholder:** Unconfirmed baseline value awaiting measurement or confirmation from twin maintainers (see [decisions.md](decisions.md)).
 * **Decision:** Design or modeling choice adopted in configuration, pending experimental test.

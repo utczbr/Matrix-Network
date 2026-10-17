@@ -58,6 +58,7 @@ _UNITS = {"ns": 1e-3, "us": 1.0, "ms": 1e3, "s": 1e6}
 
 
 def parse_time_us(token: str) -> float:
+    """Convert an INI time literal to microseconds for gate arithmetic."""
     m = re.fullmatch(r"\s*([0-9.]+)\s*(ns|us|ms|s)\s*", token)
     if not m:
         raise ValueError(f"cannot parse time {token!r}")
@@ -65,6 +66,7 @@ def parse_time_us(token: str) -> float:
 
 
 def parse_bytes(token: str) -> int:
+    """Parse a packet-length literal such as ``1400B``."""
     m = re.fullmatch(r"\s*(\d+)\s*B\s*", token)
     if not m:
         raise ValueError(f"cannot parse byte size {token!r}")
@@ -74,6 +76,7 @@ def parse_bytes(token: str) -> int:
 def section_lines(text: str, name: str) -> List[str]:
     """Lines of [General] or [Config <name>] with comments stripped (no inheritance)."""
     header = "[General]" if name == "General" else f"[Config {name}]"
+    # Read assignments local to the requested block; this checker does not resolve INI inheritance.
     out, inside = [], False
     for raw in text.splitlines():
         line = raw.strip()
@@ -86,6 +89,7 @@ def section_lines(text: str, name: str) -> List[str]:
 
 
 def parse_gates(text: str, config: str = "Wired_TAS") -> Dict[int, Tuple[List[float], float]]:
+    """Read each gate's duration list and phase offset from one config block."""
     lines = section_lines(text, config)
     if not any(re.search(r"transmissionGate\[\*\]\.initiallyOpen\s*=\s*true$", l) for l in lines):
         raise ValueError("expected 'transmissionGate[*].initiallyOpen = true' in the TAS block")
@@ -107,6 +111,7 @@ def parse_gates(text: str, config: str = "Wired_TAS") -> Dict[int, Tuple[List[fl
 
 
 def parse_payloads(text: str) -> Dict[str, int]:
+    """Read the configured application payload length for each traffic class."""
     lines = section_lines(text, "General")
     out = {}
     for cls, key in PAYLOAD_KEYS.items():
@@ -119,10 +124,12 @@ def parse_payloads(text: str) -> Dict[str, int]:
 
 # --------------------------------------------------------------------------- arithmetic
 def frame_time_us(payload_b: int, tagged: bool) -> float:
+    """Return serialization time including frame overhead and optional C-tag."""
     return (payload_b + OVERHEAD_UNTAGGED_B + (TAG_B if tagged else 0)) * 8 / LINK_MBPS
 
 
 def frames_per_window(width_us: float, payload_b: int, tagged: bool) -> int:
+    """Count complete frames that fit; fractional frames are excluded."""
     return int(math.floor(width_us / frame_time_us(payload_b, tagged) + TOL))
 
 

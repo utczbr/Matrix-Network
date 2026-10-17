@@ -53,9 +53,13 @@ class INET_API ExperimentCoordinator : public cSimpleModule, public cListener
     std::array<long, NUM_CLASSES> dropOther = {};
     std::array<std::vector<double>, NUM_CLASSES> deliveredDelaysMs;
 
+    // Map configured source-module paths to the four experiment traffic classes.
     static int classIndexFromSource(const char *path);
+    // Return the first grid point at or after generation time plus lead time.
     static int64_t computeConsumptionTickRaw(int64_t gRaw, int64_t leadRaw, int64_t tickRaw, int64_t phiRaw);
+    // Read the persistent application tag, if this packet has one.
     static Ptr<const ExperimentPacketTag> findTag(const Packet *packet);
+    // Update a region tag over the full packet payload, which may span several regions.
     static void updateDomainTag(Packet *packet, const std::function<void(const Ptr<ExperimentPacketTag>&)>& update);
     void handlePacketCreated(cComponent *source, Packet *packet);
     void handleQueueEvent(cComponent *source, Packet *packet, bool pushed);
@@ -69,7 +73,9 @@ class INET_API ExperimentCoordinator : public cSimpleModule, public cListener
     virtual void receiveSignal(cComponent *source, simsignal_t signal, cObject *object, cObject *details) override;
 
   public:
+    // Expose the replication-wide phase so every sink evaluates the same tick grid.
     int64_t getTickPhaseRaw(size_t index) const;
+    // Record a valid delivery once in the coordinator's packet-outcome ledger.
     void markDelivered(int64_t packetId, double delayMs);
 };
 

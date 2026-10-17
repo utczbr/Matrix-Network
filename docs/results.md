@@ -2,6 +2,8 @@
 
 **Revision:** October 15, 2026
 
+Implementation responsibilities are mapped in the corresponding `docs/SPEC-*.md` files. This documentation update adds no new empirical evidence.
+
 No production result is currently claimed. Earlier pilot numbers in this file
 were invalidated because the scalar exporter substituted zero for all physical
 drop counts, the retry verifier matched both packet counts and byte sums, and

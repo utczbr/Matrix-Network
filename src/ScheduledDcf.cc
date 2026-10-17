@@ -65,6 +65,7 @@ bool ScheduledDcf::isWithinActiveSlot(simtime_t now) const
     const int64_t reqSecRaw = requiredExchangeTime.raw();
     const int64_t offsetRaw = cyclePhaseOffset.raw();
 
+    // Normalize into [0, superframe); C++ remainder can be negative before the phase offset.
     int64_t deltaRaw = (now.raw() - offsetRaw) % superRaw;
     if (deltaRaw < 0)
         deltaRaw += superRaw;
@@ -89,6 +90,7 @@ simtime_t ScheduledDcf::computeNextSlotStart(simtime_t now) const
     const int64_t nowRaw = now.raw();
 
     int64_t deltaRaw = nowRaw - offsetRaw;
+    // Floor division finds the containing cycle even when time precedes the phase offset.
     int64_t k = deltaRaw / superRaw;
     if (deltaRaw < 0 && (deltaRaw % superRaw != 0))
         k--;
@@ -119,6 +121,7 @@ simtime_t ScheduledDcf::computeNextSlotStart(simtime_t now) const
 
 void ScheduledDcf::scheduleNextSlotTimer(simtime_t now)
 {
+    // Keep an earlier wake-up if one is already scheduled; otherwise arm the next eligible slot.
     simtime_t nextStart = computeNextSlotStart(now);
     if (slotStartTimer->isScheduled()) {
         if (slotStartTimer->getArrivalTime() <= nextStart)

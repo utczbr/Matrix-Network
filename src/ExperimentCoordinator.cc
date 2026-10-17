@@ -19,6 +19,7 @@ constexpr std::array<const char *, ExperimentCoordinator::NUM_CLASSES> Experimen
 
 int64_t ExperimentCoordinator::computeConsumptionTickRaw(int64_t gRaw, int64_t leadRaw, int64_t tickRaw, int64_t phiRaw)
 {
+    // simtime_t raw values share one fixed-point unit, preserving exact grid boundaries.
     const int64_t numerator = gRaw - phiRaw + leadRaw;
     int64_t quotient = numerator / tickRaw;
     if (numerator % tickRaw > 0)
@@ -28,6 +29,7 @@ int64_t ExperimentCoordinator::computeConsumptionTickRaw(int64_t gRaw, int64_t l
 
 int ExperimentCoordinator::classIndexFromSource(const char *path)
 {
+    // Keep classification tied to configured source paths; unrelated packets stay untagged.
     const std::string p(path);
     if (p.find(".amr[") != std::string::npos && p.find(".app[0].source") != std::string::npos)
         return 2;
@@ -93,6 +95,7 @@ void ExperimentCoordinator::handlePacketCreated(cComponent *source, Packet *pack
     const int64_t generationRaw = simTime().raw();
     generatedTotal[classIndex]++;
 
+    // Apply the common warmup and worst-case consumption-horizon filters once at generation.
     bool valid = true;
     if (generationRaw < warmupTime.raw()) {
         filteredWarmup[classIndex]++;
@@ -157,6 +160,7 @@ void ExperimentCoordinator::handlePacketDropped(Packet *packet, cObject *details
     if (dropDetails == nullptr)
         return;
     const auto reason = dropDetails->getReason();
+    // These radio outcomes describe overhearing, not a terminal loss of the application packet.
     if (reason == NOT_ADDRESSED_TO_US || reason == DUPLICATE_DETECTED || reason == INCORRECTLY_RECEIVED)
         return;
 
@@ -219,6 +223,7 @@ void ExperimentCoordinator::recordClassScalar(const char *prefix, const std::arr
 
 void ExperimentCoordinator::finish()
 {
+    // Valid packets still pending at the run boundary are recorded as late terminations.
     std::array<long, NUM_CLASSES> lateTermination = {};
     for (const auto& entry : validPackets)
         if (entry.second.outcome == PENDING)
@@ -246,6 +251,7 @@ void ExperimentCoordinator::finish()
         auto& delays = deliveredDelaysMs[c];
         if (delays.empty())
             continue;
+        // Interpolate empirical quantiles from pooled, sorted delivered-delay samples.
         std::sort(delays.begin(), delays.end());
         for (double q : levels) {
             const double position = q * (delays.size() - 1);

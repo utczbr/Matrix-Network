@@ -18,6 +18,7 @@ RES_ROOT = Path(SIM_DIR) / "results" / "verify_spike_s1"
 
 
 def extract_scalars(path):
+    """Read scalar records into a name-to-value mapping for acceptance checks."""
     scalars = {}
     with open(path, "r", encoding="utf-8") as stream:
         for line in stream:
@@ -33,6 +34,7 @@ def extract_scalars(path):
 
 
 def run_sim(config, n_amrs, phy_rate, sim_time="10s"):
+    """Run one acceptance configuration and return its parsed scalars and parameters."""
     run_dir = RES_ROOT / f"{config}_N{n_amrs}_{phy_rate}Mbps"
     run_dir.mkdir(parents=True, exist_ok=True)
     for path in run_dir.iterdir():
@@ -90,6 +92,7 @@ def seconds(parameters, key):
 
 
 def check_scheduled(label, result, max_delay_bound_ms, expected):
+    """Check schedule geometry, retry behavior, traffic, and observed delay bound."""
     scalars, parameters = result
     retries = sum_exact(scalars, "packetSentToPeerWithRetry:count")
     retry_drops = sum_exact(scalars, "retryLimitReached:count")

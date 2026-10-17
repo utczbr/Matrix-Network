@@ -70,7 +70,7 @@ def run_simulation(config, sim_time="15s", warmup="5s", tel_us=2000, seed=0, ext
     return res.stdout
 
 def parse_scalar_file(sca_path):
-    """Parses an OMNeT++ scalar (.sca) file into a dictionary."""
+    """Parse scalar records from a single OMNeT++ .sca file."""
     scalars = {}
     if not os.path.exists(sca_path):
         return scalars
@@ -94,12 +94,13 @@ def require_scalar(scalars, key):
     return scalars[key]
 
 def coordinator_drop_total(scalars):
+    """Sum the coordinator's terminal physical-drop counters across traffic classes."""
     keys = [f"MatrixFactoryNetwork.experimentCoordinator n_drop_queue_{cls}"
             for cls in ("orders", "dds", "state", "telemetry")]
     return int(sum(require_scalar(scalars, key) for key in keys))
 
 def parse_vector_data(vec_path, module_substr, vector_substr):
-    """Parses time-series points for a specific vector name from an OMNeT++ .vec file."""
+    """Load .vec samples matching both the module path and vector name filters."""
     if not os.path.exists(vec_path):
         return []
     target_ids = set()

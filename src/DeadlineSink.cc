@@ -68,6 +68,7 @@ int64_t DeadlineSink::computeConsumptionTickRaw(int64_t gRaw, int64_t leadRaw, i
 {
     // Exact 64-bit integer ceiling division for:
     // c = phi + ceil((g - phi + L) / T) * T
+    // Signed division truncates toward zero; the positive-remainder adjustment implements ceil.
     int64_t num = gRaw - phiRaw + leadRaw;
     int64_t q = num / tickRaw;
     int64_t r = num % tickRaw;
@@ -97,6 +98,7 @@ void DeadlineSink::recordDomainBreakdown(const Packet *packet, simtime_t generat
         throw cRuntimeError("DeadlineSink: packet class '%s' arrived at '%s' sink",
             tag->getTrafficClass(), trafficClass.c_str());
 
+    // State crosses the radio before the AP; Orders crosses it after the AP on downlink.
     const bool wirelessFlow = trafficClass == "state" || trafficClass == "orders";
     if (wirelessFlow && tag->getApBoundaryTime() < SIMTIME_ZERO)
         throw cRuntimeError("DeadlineSink: missing AP boundary timestamp for %s packet id %ld",
@@ -131,6 +133,7 @@ void DeadlineSink::consumePacket(Packet *packet)
     const simtime_t aSim = simTime();
     const int64_t gRaw = gSim.raw();
     const int64_t aRaw = aSim.raw();
+    // Keep deadline comparisons in raw ticks; convert only for reported delay values.
     const int64_t tauRaw = aRaw - gRaw;
     const double tauMs = (aSim - gSim).dbl() * 1000.0;
     const int64_t dNomRaw = nominalDeadline.raw();
@@ -202,6 +205,7 @@ void DeadlineSink::consumePacket(Packet *packet)
 
         // 6. Late-Arrival Semantics Tracking (ZOH Staleness vs. Watchdog TTL Discard)
         if (isZohFlow) {
+            // Staleness counts grid ticks elapsed beyond the packet's target consumption tick.
             const int64_t cArrivalTickRaw = computeConsumptionTickRaw(aRaw, 0, tRaw, phiRaw);
             const int64_t cTargetTickRaw = computeConsumptionTickRaw(gRaw, dNomRaw, tRaw, phiRaw);
             long staleTicks = std::max<long>(0L, (cArrivalTickRaw - cTargetTickRaw) / tRaw);
@@ -269,6 +273,7 @@ void DeadlineSink::finish()
     }
 
     if (!deliveredDelaysMs.empty()) {
+        // Linear interpolation uses the empirical order statistics at adjacent ranks.
         std::sort(deliveredDelaysMs.begin(), deliveredDelaysMs.end());
         const size_t n = deliveredDelaysMs.size();
 

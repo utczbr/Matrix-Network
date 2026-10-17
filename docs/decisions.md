@@ -2,6 +2,8 @@
 
 **Revision:** Oct 15, 2026. Campaign-readiness repair synchronizes the 25-level quantile contract, full packet ledger, global tick phases, serviceable 12 Mbps schedule, and a 22-replication floor pending the repaired pilot.
 
+Implementation references: deadline filters and packet outcomes are described in [SPEC-deadline-sink.md](SPEC-deadline-sink.md); slot admission and timer behavior are described in [SPEC-scheduled-dcf.md](SPEC-scheduled-dcf.md); lookup aggregation and interpolation are described in [SPEC-lookup-ner-integration.md](SPEC-lookup-ner-integration.md). The specifications explain how the locked decisions map to code.
+
 ### Status Vocabulary
 * **Decision**: Adopted in the model, validated analytically, awaiting experimental simulation test.
 * **Proposed**: Recommended in the Oct 13 technical review, awaiting final supervisory confirmation.
