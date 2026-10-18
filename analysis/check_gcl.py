@@ -207,6 +207,10 @@ def run_checks(ini_text: str) -> Tuple[List[Check], List[str]]:
         cap = ceilings[cls] / cyc_s
         cells = "  ".join(f"N={n}: {100 * n * hz / cap:.0f}%" for n in FLEET)
         report.append(f"  {cls:<10} (capacity {cap:.0f} frames/s)  {cells}")
+    if "dds" in ceilings:
+        cap = ceilings["dds"] / cyc_s
+        occ = 100 * (N_STATIONS * DDS_HZ) / cap
+        report.append(f"  {'dds':<10} (capacity {cap:.0f} frames/s)  {N_STATIONS} stations @ {DDS_HZ:g} Hz: {occ:.1f}%")
     if "telemetry" in ceilings:
         cap = ceilings["telemetry"] / cyc_s
         cells = "  ".join(f"{i:g} us: {100 * (N_STATIONS * 1e6 / i) / cap:.0f}%" for i in TELEMETRY_INTERVALS_US)

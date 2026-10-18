@@ -8,7 +8,7 @@ Implements only what is closed in docs/decisions.md (Oct 14, 2026):
   L = T for State/Telemetry is obtained by passing ``lead_ms=tick_ms``.
 * Per-replication tick-grid phase phi (section 1.8): c = phi + ceil((g + L - phi) / T) * T.
 * Accounting filters (section 1.5): discard g < warm-up, discard c > sim-time-limit,
-  mutually exclusive bins On_Time / Late_Arrival / Drop_Queue / Drop_Retry / Drop_Other.
+  mutually exclusive bins On_Time / Late_Arrival / Late_Termination / Drop_Queue / Drop_Retry / Drop_Other.
 * Staleness in ticks for delivered State/Telemetry packets (section 1.1).
 * Offline evaluation of Miss_A / Miss_B from the stored delay quantile table, so
   other T, other L and other D need no re-run (section 1.3.1).
@@ -127,7 +127,7 @@ def outcome_counts(g, a, cause, d_ms: float, *, definition: str = "B",
 
     ``cause`` holds "" for packets without a recorded drop, otherwise one of
     "queue", "retry", "other". A packet with a = NaN and no drop cause was still
-    in flight at termination and is counted as Late_Arrival (section 1.5 item 3).
+    in flight at termination and is counted as Late_Termination (section 1.5 item 3).
 
     ``horizon_lead_ms`` is the lead time used by the horizon filter (c <= sim-time-limit);
     it defaults to the lead time of the miss test. Passing the largest lead of a family
@@ -151,12 +151,20 @@ def outcome_counts(g, a, cause, d_ms: float, *, definition: str = "B",
     hz = lead if horizon_lead_ms is None else horizon_lead_ms
     keep = valid_mask(g, hz, tick_ms, phase_ms, warmup_s, sim_limit_s)
     miss = miss_a(g, a, d_ms) if definition == "A" else miss_b(g, a, lead, tick_ms, phase_ms)
-    out = {"n_valid": int(keep.sum()),
-           "On_Time": int((keep & fin & ~miss).sum()),
-           "Late_Arrival": int((keep & ((fin & miss) | (~fin & (cause == "")))).sum())}
+    out = {
+        "n_valid": int(keep.sum()),
+        "On_Time": int((keep & fin & ~miss).sum()),
+        "Late_Arrival": int((keep & fin & miss).sum()),
+        "Late_Termination": int((keep & ~fin & (cause == "")).sum()),
+    }
     for key, name in DROP_BINS.items():
         out[name] = int((keep & ~fin & (cause == key)).sum())
-    total = out["On_Time"] + out["Late_Arrival"] + sum(out[n] for n in DROP_BINS.values())
+    total = (
+        out["On_Time"]
+        + out["Late_Arrival"]
+        + out["Late_Termination"]
+        + sum(out[n] for n in DROP_BINS.values())
+    )
     if total != out["n_valid"]:  # conservation law, section 1.5 item 4
         raise AssertionError(f"packet conservation violated: {total} != {out['n_valid']}")
     return out

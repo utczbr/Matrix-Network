@@ -13,11 +13,12 @@ modulo is forbidden.
 | Method | Responsibility |
 | --- | --- |
 | `initialize` | Reads slot geometry and rejects nonpositive durations, out-of-frame allocations, or exchanges too long for a slot. |
-| `isWithinActiveSlot` | Maps the current time into the phase-adjusted superframe and checks both slot membership and remaining exchange time. |
+| `isWithinActiveSlot` | Maps the current time into the phase-adjusted superframe and checks both slot membership and remaining exchange time. When multiple contiguous slots are assigned (as in the AP downlink allocation), remaining time is evaluated against the end of the entire contiguous block rather than individual sub-slot boundaries. |
 | `computeNextSlotStart` | Finds the earliest assigned slot boundary strictly after the current time, including times before the configured phase offset. |
 | `scheduleNextSlotTimer` / `handleMessage` | Arms the next boundary and requests channel access when queued frames are waiting. |
 | `processUpperFrame` | Sends immediately through DCF when an exchange fits; otherwise queues the frame until its next slot. |
 | `channelGranted` / `frameSequenceFinished` | Releases grants received outside an eligible slot and resumes or defers queued transmissions after each sequence. |
+| `finish` | Records `scheduledDcf_numSlotDeferrals`, `scheduledDcf_numDeferredOnEnqueue`, `scheduledDcf_numGrantReleased`, and `scheduledDcf_numGrantedInSlot`. |
 
 The acceptance checks in `analysis/verify_spike_s1.py` validate resolved slot parameters, successful scheduled traffic, retry counters, and the State delay bound at nominal and stress points.
 
@@ -33,9 +34,9 @@ acceptance script does this and verifies the resolved slot parameters.
 | --- | --- |
 | `slotStartOffset` | first assigned start within the superframe |
 | `slotStrideTime` | distance between starts assigned to the same node |
-| `numAssignedSlots` | one for an AMR; multiple contiguous slots for the AP |
+| `numAssignedSlots` | one for an AMR; multiple contiguous slots for the AP (contiguous slots merge into an uninterrupted transmission window) |
 | `slotDuration` | duration of this node's slot type |
-| `requiredExchangeTime` | calibrated minimum complete frame exchange |
+| `requiredExchangeTime` | calibrated sequence duration plus DIFS (28 µs); ensures any exchange admitted before the cutoff finishes at least one DIFS before the next slot boundary so INET's `backoffOptimization = true` grants the next slot immediately |
 | `superframeDuration` | common cycle, including any padding |
 | `cyclePhaseOffset` | phase relative to simulation time zero |
 

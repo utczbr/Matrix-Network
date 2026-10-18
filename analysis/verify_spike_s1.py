@@ -12,6 +12,7 @@ from env_config import (
     INET_ROOT_STR as INET_ROOT,
     MATRIXFACTORY_LIB_STR as MATRIXFACTORY_LIB,
     SIM_DIR_STR as SIM_DIR,
+    assert_library_fresh,
 )
 
 RES_ROOT = Path(SIM_DIR) / "results" / "verify_spike_s1"
@@ -91,14 +92,21 @@ def seconds(parameters, key):
     return float(parameters[key][:-1])
 
 
-def check_scheduled(label, result, max_delay_bound_ms, expected):
-    """Check schedule geometry, retry behavior, traffic, and observed delay bound."""
+def check_scheduled(label, result, max_delay_bound_ms, max_orders_median_ms, max_orders_bound_ms, expected):
+    """Check schedule geometry, retry behavior, conservation, and uplink/downlink delay bounds."""
     scalars, parameters = result
     retries = sum_exact(scalars, "packetSentToPeerWithRetry:count")
     retry_drops = sum_exact(scalars, "retryLimitReached:count")
     transmitted = sum_exact(scalars, "packetSentToPeer:count")
     maximum = required(scalars, "MatrixFactoryNetwork.fms.app[0].sink ecdf_q_1.000")
     granted = sum_exact(scalars, "scheduledDcf_numGrantedInSlot")
+    grant_released = sum_exact(scalars, "scheduledDcf_numGrantReleased")
+    if grant_released != 0:
+        raise RuntimeError(f"{label}: forfeited {grant_released} channel grants")
+
+    coord = "MatrixFactoryNetwork.experimentCoordinator"
+    orders_median = required(scalars, f"{coord} ecdf_orders_q_0.500")
+    orders_max = required(scalars, f"{coord} ecdf_orders_q_1.000")
     actual = {
         "state_slot": seconds(parameters, "MatrixFactoryNetwork.amr[0].wlan[0].mac.dcf slotDuration"),
         "orders_slot": seconds(parameters, "MatrixFactoryNetwork.ap.wlan[0].mac.dcf slotDuration"),
@@ -113,18 +121,45 @@ def check_scheduled(label, result, max_delay_bound_ms, expected):
         raise RuntimeError(f"{label}: retries={retries}, retry-limit drops={retry_drops}")
     if maximum > max_delay_bound_ms:
         raise RuntimeError(f"{label}: State maximum {maximum:.3f} ms exceeds {max_delay_bound_ms:.3f} ms")
-    print(f"[ok] {label}: tx={transmitted}, retries=0, retry drops=0, State max={maximum:.3f} ms")
+
+    # Coordinator 6-bin packet conservation across all 4 classes (WP-04a)
+    total_valid = 0
+    for cls in ("orders", "dds", "state", "telemetry"):
+        gen = int(required(scalars, f"{coord} n_generated_valid_{cls}"))
+        term = sum(
+            int(required(scalars, f"{coord} {m}_{cls}"))
+            for m in ("n_delivered_valid", "n_drop_queue", "n_drop_retry", "n_drop_other", "n_late_termination")
+        )
+        if gen != term:
+            raise RuntimeError(f"{label} ({cls}): packet conservation failed ({gen} != {term})")
+        total_valid += gen
+
+    # Downlink Orders stability: zero physical drops and bounded median/tail delay (WP-04b)
+    orders_drops = sum(
+        int(required(scalars, f"{coord} {m}_orders"))
+        for m in ("n_drop_queue", "n_drop_retry", "n_drop_other")
+    )
+    if orders_drops != 0:
+        raise RuntimeError(f"{label}: Orders suffered {orders_drops} physical drops")
+    if orders_median > max_orders_median_ms:
+        raise RuntimeError(f"{label}: Orders median {orders_median:.3f} ms exceeds {max_orders_median_ms:.3f} ms")
+    if orders_max > max_orders_bound_ms:
+        raise RuntimeError(f"{label}: Orders max {orders_max:.3f} ms exceeds {max_orders_bound_ms:.3f} ms")
+
+    print(f"[ok] {label}: tx={transmitted}, valid={total_valid}, retries=0, drops=0, "
+          f"State max={maximum:.3f} ms, Orders p50/max={orders_median:.3f}/{orders_max:.3f} ms")
 
 
 def main():
     print("ScheduledDcf strict acceptance")
+    assert_library_fresh()
     nominal = run_sim("Cell2", 40, 54)
     worst_case = run_sim("Cell2", 80, 12)
     csma = run_sim("Cell1", 40, 54)
 
-    check_scheduled("N=40, 54 Mbps", nominal, 25.0,
+    check_scheduled("N=40, 54 Mbps", nominal, 25.0, 20.0, 80.0,
                     {"state_slot": 0.0004, "orders_slot": 0.0004, "superframe": 0.020})
-    check_scheduled("N=80, 12 Mbps", worst_case, 95.0,
+    check_scheduled("N=80, 12 Mbps", worst_case, 95.0, 90.0, 200.0,
                     {"state_slot": 0.00085, "orders_slot": 0.00056, "superframe": 0.090})
     csma_retries = sum_exact(csma[0], "packetSentToPeerWithRetry:count")
     if csma_retries <= 0:

@@ -29,6 +29,8 @@ class INET_API ScheduledDcf : public Dcf
 
     // Instrumentation counters for acceptance verification (Checklist C6)
     long numSlotDeferrals = 0;
+    long numDeferredOnEnqueue = 0;
+    long numGrantReleased = 0;
     long numGrantedInSlot = 0;
 
   protected:

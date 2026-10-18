@@ -78,7 +78,7 @@ def read_packets(path) -> pd.DataFrame:
 def build_tables(packets: pd.DataFrame, base_seed: int = 0,
                  warmup_s: float = dm.WARMUP_S, sim_limit_s: float = dm.SIM_LIMIT_S):
     """Return (lookup_summary, lookup_ecdf) DataFrames from a per-packet table."""
-    summary_rows, ecdf_rows = [], []
+    summary_rows, ecdf_rows, replication_rows = [], [], []
     levels = np.array(dm.QUANTILE_LEVELS)
     idx = {lvl: i for i, lvl in enumerate(dm.QUANTILE_LEVELS)}
 
@@ -89,7 +89,7 @@ def build_tables(packets: pd.DataFrame, base_seed: int = 0,
         nominal = dm.NOMINAL_D_MS[cls]
 
         rates = {("A", d): [] for d in dm.D_SPECTRUM_MS} | {("B", d): [] for d in dm.D_SPECTRUM_MS}
-        bins = {"n_valid": 0, "Drop_Queue": 0, "Drop_Retry": 0, "Drop_Other": 0}
+        bins = {"n_valid": 0, "Drop_Queue": 0, "Drop_Retry": 0, "Drop_Other": 0, "Late_Termination": 0}
         nominal_misses = 0
         pooled = []
 
@@ -113,7 +113,23 @@ def build_tables(packets: pd.DataFrame, base_seed: int = 0,
             oc = dm.outcome_counts(g, a, cause, nominal, definition="B", **kw)
             for k in bins:
                 bins[k] += oc[k]
-            nominal_misses += oc["Late_Arrival"] + oc["Drop_Queue"] + oc["Drop_Retry"] + oc["Drop_Other"]
+            nominal_misses += (
+                oc["Late_Arrival"]
+                + oc["Late_Termination"]
+                + oc["Drop_Queue"]
+                + oc["Drop_Retry"]
+                + oc["Drop_Other"]
+            )
+            rep_drops = oc["Drop_Queue"] + oc["Drop_Retry"] + oc["Drop_Other"]
+            rep_row = {
+                **dict(zip(KEY, key)),
+                "rep": int(rep),
+                "n_total": oc["n_valid"],
+                "p_loss": (rep_drops / oc["n_valid"]) if oc["n_valid"] else float("nan"),
+            }
+            for d in dm.D_SPECTRUM_MS:
+                rep_row[f"miss_B_{d}ms"] = rates[("B", d)][-1]
+            replication_rows.append(rep_row)
 
             keep = dm.valid_mask(g, HORIZON_LEAD_MS, dm.T_PRIMARY_MS, phase, warmup_s, sim_limit_s)
             dly = dm.delay_ms(g, a)
@@ -132,7 +148,7 @@ def build_tables(packets: pd.DataFrame, base_seed: int = 0,
             n_Drop_Queue=bins["Drop_Queue"],
             n_Drop_Retry=bins["Drop_Retry"],
             n_Drop_Other=bins["Drop_Other"],
-            n_Late_Termination=0,
+            n_Late_Termination=bins["Late_Termination"],
         )
         for d in dm.D_SPECTRUM_MS:
             row[f"miss_A_{d}ms"] = _nanmean(rates[("A", d)])
@@ -158,6 +174,7 @@ def build_tables(packets: pd.DataFrame, base_seed: int = 0,
 
     summary = pd.DataFrame(summary_rows, columns=SUMMARY_COLUMNS)
     ecdf = pd.DataFrame(ecdf_rows, columns=ECDF_COLUMNS)
+    summary.attrs["replications"] = pd.DataFrame(replication_rows, columns=REPLICATION_COLUMNS)
     return summary, ecdf
 
 
@@ -213,7 +230,9 @@ def build_tables_from_sca(sca_dir: Path, strict_conservation: bool = True,
 
         n_amr = int(attrs.get("nAmr", attrs.get("*.numAmrs", 10)))
         tel_str = attrs.get("telInterval", "2000us").strip('"')
-        lam = TEL_INTERVAL_TO_MBPS.get(tel_str, 22.4)
+        if tel_str not in TEL_INTERVAL_TO_MBPS:
+            raise RuntimeError(f"{sca_path.name}: unmapped telInterval {tel_str!r}")
+        lam = TEL_INTERVAL_TO_MBPS[tel_str]
         phy_str = attrs.get("phyRate", "54Mbps").replace("Mbps", "").strip('"')
         phy = int(float(phy_str))
         rep = int(attrs.get("repetition", 0))

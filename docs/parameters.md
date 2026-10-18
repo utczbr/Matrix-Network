@@ -33,12 +33,12 @@ The parameter values remain defined in `simulations/omnetpp.ini` and the NED dec
 | Parameter | INI / NED Key | Baseline Value | Units | Status | Source / Reference | Rationale & Notes |
 | :--- | :--- | :--- | :--- | :---: | :--- | :--- |
 | **Sim Time Limit** | `sim-time-limit` | `60` | s | Decision | Experiment design | Run duration; common horizon removes generations whose 100 ms consumption point exceeds it. |
-| **Warmup Period** | `warmup-period` | `5` | s | Rerun required | C9 | Transient cutoff to be revalidated by the repaired pilot. |
+| **Warmup Period** | `warmup-period` | `5` | s | Verified | C9 | Transient cutoff validated by pilot run (stabilizes within 5.0 s). |
 | **Number of RNGs** | `num-rngs` | `3` | - | Decision | Architecture choice (C8) | `rng-0`: MAC/protocols, `rng-1`: traffic and global tick phases, `rng-2`: AMR mobility. |
 | **App Generator RNG** | `**.app[*].source.rng-0` | `1` | - | Decision | Architecture choice (C8) | Gives offered-load parity across paired cells. |
 | **Global Tick-Phase RNG** | `*.experimentCoordinator.rng-1` | `1` | - | Decision | Experiment contract | One draw for each `T={10,50,500} ms` per replication. |
 | **AMR Mobility RNG** | `*.amr[*].mobility.rng-0` | `2` | - | Decision | Architecture choice (C8) | Dedicated spatial stream. |
-| **Replication Count** | `repeat` | `22` | runs | Decision | Repaired C9 gate | Conservative floor; `pilot_run.py` must confirm it using the primary Definition-B miss rate. |
+| **Replication Count** | `repeat` | `22` | runs | Verified | Repaired C9 gate | Conservative floor confirmed by `pilot_run.py` at the 95 Mbps knee (6.25% relative error at 95% CI). |
 | **Seed Set** | `seed-set` | `${repetition}` | - | Decision | Standard OMNeT++ | Controlled pseudo-random seed variation. |
 | **Vector Recording** | `**.vector-recording` | `false` | bool | Decision | Implementation Guide Step 5.1 | Disabled for campaign runs; enabled only in `[Config Debug]`. |
 | **Scalar Recording** | `**.scalar-recording` | `true` | bool | Decision | Implementation Guide Step 5.1 | Summary statistics, drop counters, and packet totals. |
@@ -66,7 +66,7 @@ The parameter values remain defined in `simulations/omnetpp.ini` and the NED dec
 | :--- | :--- | :---: | :--- |
 | **Fleet sweep $N$** | $\{5, 10, 20, 40, 80\}$; point mode $10$ | Decision | The twin's 13 agents lie inside the grid; no extrapolation. $N = 80$ gives $37\,\%$ wireless utilization at 54 Mbps and $95\,\%$ at 12 Mbps. |
 | **Twin composition** | 13 JaCaMo agents; split into stations and AMRs not yet given | Open (non-blocking) | Ask the maintainers; any AMR count between 5 and 80 is covered. |
-| **Wired offered load at $N = 40$** | $26.9$ / $81.8$ / $160.2$ Mbps for telemetry $22.4$ / $74.7$ / $149.3$ Mbps | Verified (analytic) | $\rho \approx 0.27$ / $0.82$ / $1.60$ on $100$ Mbps; at $1$ Gbps the middle point would be $\rho \approx 0.08$. |
+| **Wired offered load at $N = 40$** | $27.8$ / $82.7$ / $161.1$ Mbps for telemetry $22.4$ / $74.7$ / $149.3$ Mbps (including $3.42$ Mbps State and $0.86$ Mbps DDS) | Verified (analytic) | $\rho \approx 0.28$ / $0.83$ / $1.61$ on $100$ Mbps; at $1$ Gbps the middle point would be $\rho \approx 0.083$. |
 | **Link speed rationale** | $100$ Mbps kept as a scale model | Decision | Scaling capacity relative to background load studies the queueing knee without simulating ten times more packets. |
 | **AMR-to-AP / AMR-to-AMR distance** | $\le 42.43$ m / $\le 84.85$ m | Verified (analytic) | Received power $-59.6$ dBm and $-65.7$ dBm, above the $-85$ dBm sensitivity: no hidden terminals. |
 | **Spatial RNG** | Dedicated stream for AMR coordinates | Decision | Same positions in `Radio_CSMA` and `Radio_Sched` for a given seed (checklist C8). |
@@ -93,7 +93,7 @@ The parameter values remain defined in `simulations/omnetpp.ini` and the NED dec
 | **Carrier Frequency** | `transmitter.centerFrequency` | `2.412` | GHz | Decision | INET default Channel 1 | Standard 802.11 Channel 1 (2.412 GHz). |
 | **Receiver Sensitivity**| `receiver.sensitivity` | `-85` | dBm | Decision | INET `Ieee80211Radio` | Demodulation threshold for basic sensitivity. |
 | **SNIR Threshold** | `receiver.snirThreshold` | `4` | dB | Decision | INET `Ieee80211Radio` | Signal-to-noise-and-interference ratio threshold. |
-| **Background Noise** | `backgroundNoise.power` | `-110` | dBm | Decision | Intentional modeling choice | **Error-free channel by scope:** yields ~50.4 dB SNR at 42.4 m in free space. The $-95\ \text{dBm}$ noise floor (yielding ~35.4 dB SNR in free space, or ~24 dB in InF-NLOS) is retained as an optional sensitivity configuration. |
+| **Background Noise** | `backgroundNoise.power` | `-110` | dBm | Decision | Intentional modeling choice | **Error-free channel by scope:** yields ~50.4 dB SNR at 42.4 m in free space. The $-95\ \text{dBm}$ noise floor (yielding ~35.4 dB SNR in free space, or ~16.2 dB in InF-NLOS at 42.43 m) is retained as an optional sensitivity configuration. |
 | **MAC Pending Queue** | `mac.dcf.channelAccess.pendingQueue.packetCapacity` | `100` | packets | Decision | INET `PendingQueue.ned` | 100 packets MAC buffer per node (vs. 20 packets/class wired). |
 | **Short Retry Limit** | `mac.dcf.recoveryProcedure.shortRetryLimit` | `7` | retries | Verified | INET `NonQosRecoveryProcedure` | Standard IEEE 802.11 short retry limit. |
 | **Long Retry Limit** | `mac.dcf.recoveryProcedure.longRetryLimit` | `4` | retries | Verified | INET `NonQosRecoveryProcedure` | Standard IEEE 802.11 long retry limit. |
@@ -121,10 +121,10 @@ Based on the analytic capacity model ([analysis/capacity.py](../analysis/capacit
 
 > [!WARNING]
 > **Radio Bottleneck Warning:** At 54 Mbps with 40 AMRs, the wireless medium reaches only ~18% utilization. Contention delay and backoff collisions will be minimal, meaning the "wireless bottleneck at high fleet density" hypothesis may not manifest.
-> **Mitigation Options for Phase 9 Pilot:**
-> 1. Lower the wireless PHY rate in sweep configurations (e.g., test 12 Mbps or 24 Mbps).
-> 2. Fleet sweep extended to N = 80 (adopted in Q5): 37% at 54 Mbps and 95% at 12 Mbps. N = 120 remains optional.
-> 3. Increase state report payload or transmission frequency based on real VDA 5050 captures (Q6, still open).
+> **Locked Mitigations (Q5, Q6, Q8):**
+> 1. Wireless PHY rate sweep includes `54 Mbps` and `12 Mbps` (locked in Q8).
+> 2. Fleet sweep extended to $N \in \{5, 10, 20, 40, 80\}$ (locked in Q5): 37% at 54 Mbps and 95% at 12 Mbps. $N = 120$ remains optional.
+> 3. VDA 5050 message sizes and rates locked to 1000 B at 10 Hz (State) and 600 B at 5 Hz (Orders) per Q6.
 
 ---
 
@@ -135,7 +135,7 @@ Based on the analytic capacity model ([analysis/capacity.py](../analysis/capacit
 | **Orders** (VDA 5050) | FMS &rarr; AMR | `5051` | `6` | `TC 3` | Highest | `600` B | `exponential(200ms)` | `uniform(0s, 200ms)` | $50\ \text{ms}$ | $50\ \text{ms}$ | Decision (Q6) |
 | **DDS** (Inter-station) | Station &rarr; FMS | `5100` | `4` | `TC 2` | High | `200` B | `uniform(9.5ms, 10.5ms)` *(jitter $\pm 5\%)$* | `uniform(0s, 10ms)` | $5\ \text{ms}$ | $5\ \text{ms}$ | Decision (Q7, Opt 7B) |
 | **State** (VDA 5050) | AMR &rarr; FMS | `5050` | `2` | `TC 1` | Medium | `1000` B | `uniform(90ms, 110ms)`| `uniform(0s, 100ms)` | $50\ \text{ms}$ | $50\ \text{ms}$ | Decision (Q6) |
-| **Telemetry** (Sensors) | Station &rarr; FMS | `5200` | `0` | `TC 0` | Background | `1400` B | `exponential(${telInterval})`<br>*(Point: 2000µs; Sweep: 8 levels)* | `uniform(0s, ${telInterval})` | $100\ \text{ms}$ | N/A (excluded) | Decision (Q8) |
+| **Telemetry** (Sensors) | Station &rarr; FMS | `5200` | `0` | `TC 0` | Background | `1400` B | `exponential(${telInterval})`<br>*(Point: 2000µs; Sweep: 8 levels)* | `uniform(0s, ${telInterval})` | $100\ \text{ms}$ | $100\ \text{ms}$ *(secondary panel)* | Decision (Q8) |
 
 *Note: Telemetry Generator Process (Q8 Locked): Poisson arrival process (`exponential(interval)`) per station across all configurations (Point and Sweep). 8-level sweep intervals (`2000, 996, 747, 600, 527, 472, 407, 300 µs`) bracket both the 44.8 Mbps TAS gate ceiling and the 100 Mbps FIFO saturation knee (aggregate payload 22.4, 45.0, 60.0, 74.7, 85.0, 95.0, 110.0, 149.3 Mbps). Initial offset scales dynamically with interval (`uniform(0s, ${telInterval})`), guaranteeing that the 4 stations are desynchronized at $t=0$ across all arrival rates.*
 
@@ -222,7 +222,7 @@ Based on the analytic capacity model ([analysis/capacity.py](../analysis/capacit
 | **Slot Duration** | `slotDuration` | 54 Mbps: 400 µs both directions; 12 Mbps: 850 µs State, 560 µs Orders | µs | Decision | Required exchanges are 260/200 µs at 54 Mbps and 820/550 µs at 12 Mbps. |
 | **Superframe Duration** | `superframeDuration` | 54 Mbps: 3, 5, 9, 20, 48 ms; 12 Mbps: 6, 10, 20, 42, 90 ms | ms | Decision | Per-flow service remains at or above offered load; N=80 does not exceed the 90 ms minimum State interarrival. |
 | **Contention Backoff** | `cwMin/cwMax` | `0` | slots | Decision | Zero backoff slots in scheduled mode. |
-| **Phase Offset to TAS** | `cyclePhaseOffset` | Configurable (`0us` default) | µs | Decision | Gated to arrive at switch in $[300, 414.4)\ \mu\text{s}$ for zero gate wait. |
+| **Phase Offset to TAS** | `cyclePhaseOffset` | `0us` (locked reference phase) | µs | Verified (analytic, C6) | Because $s_{\text{AMR}} \in \{400, 850\}\ \mu\text{s}$ and the $1000\ \mu\text{s}$ GCL cycle have $\gcd(400,1000)=200\ \mu\text{s}$ and $\gcd(850,1000)=50\ \mu\text{s}$, a fleet of $N$ AMRs transmits at 5 (54 Mbps) or 20 (12 Mbps) distinct phases modulo $1\ \text{ms}$. Shifting a single global offset only rotates which subset hits $[300, 414.4)\ \mu\text{s}$ without waiting; gate wait is bounded by $\le 800\ \mu\text{s}$ across all AMRs. |
 
 ---
 

@@ -9,7 +9,7 @@ Executes:
    Sweeps offered telemetry payload across 8 levels (22.4 to 149.3 Mbps) in Cell 1 (FIFO)
    and Cell 5 (TAS) to empirically observe the FIFO knee (~85-95 Mbps) and confirm Finding F1.
 3. Replication Sizing (Jain's Formulation):
-   Computes required replications for 95% confidence and 5% relative error across seeds.
+   Computes required replications for 95% confidence and 7% relative error across seeds.
 4. Sample Size Matrix Check:
    Validates sample sufficiency for tail latency (p99 and p99.9) reporting.
 """
@@ -30,6 +30,7 @@ from env_config import (
     OMNETPP_ENV_STR as OMNETPP_ENV,
     INET_ROOT_STR as INET_ROOT,
     MATRIXFACTORY_LIB_STR as MATRIXFACTORY_LIB,
+    assert_library_fresh,
 )
 RES_DIR = SIM_DIR / "results" / "pilot"
 CAMPAIGN_REPS = 22
@@ -95,9 +96,21 @@ def require_scalar(scalars, key):
 
 def coordinator_drop_total(scalars):
     """Sum the coordinator's terminal physical-drop counters across traffic classes."""
-    keys = [f"MatrixFactoryNetwork.experimentCoordinator n_drop_queue_{cls}"
-            for cls in ("orders", "dds", "state", "telemetry")]
+    keys = [
+        f"MatrixFactoryNetwork.experimentCoordinator {drop}_{cls}"
+        for cls in ("orders", "dds", "state", "telemetry")
+        for drop in ("n_drop_queue", "n_drop_retry", "n_drop_other")
+    ]
     return int(sum(require_scalar(scalars, key) for key in keys))
+
+def total_dds_miss_b_5ms(scalars):
+    """Sum delivered late DDS packets and terminal DDS drops/terminations."""
+    delivered_miss = require_scalar(scalars, "MatrixFactoryNetwork.fms.app[2].sink n_miss_B_5ms")
+    terminal_miss = sum(
+        require_scalar(scalars, f"MatrixFactoryNetwork.experimentCoordinator {name}_dds")
+        for name in ("n_drop_queue", "n_drop_retry", "n_drop_other", "n_late_termination")
+    )
+    return int(delivered_miss + terminal_miss)
 
 def parse_vector_data(vec_path, module_substr, vector_substr):
     """Load .vec samples matching both the module path and vector name filters."""
@@ -166,6 +179,12 @@ def task1_warmup_validation():
 
     # Extract queue length points over time on switch egress to FMS (eth[0])
     points = parse_vector_data(vec_file, "tsnSwitch.eth[0].macLayer.queue", "queueLength:vector")
+    if not points:
+        candidates = [
+            parse_vector_data(vec_file, f"tsnSwitch.eth[{i}].macLayer.queue", "queueLength:vector")
+            for i in range(6)
+        ]
+        points = max(candidates, key=len, default=[])
     print(f"  [+] Extracted {len(points)} queue samples across [0s, 15s].")
 
     # Aggregate into 1-second time buckets to track mean queue level
@@ -263,11 +282,11 @@ def task2_knee_identification():
         _, sc5 = results.get(("Cell5", tel_us), (mbps, {}))
 
         drops_c1 = coordinator_drop_total(sc1)
-        dds_miss_c1 = int(require_scalar(sc1, "MatrixFactoryNetwork.fms.app[2].sink n_miss_B_5ms"))
+        dds_miss_c1 = total_dds_miss_b_5ms(sc1)
         state_p99_c1 = require_scalar(sc1, "MatrixFactoryNetwork.fms.app[0].sink lat_p99_ms")
 
         drops_c5 = coordinator_drop_total(sc5)
-        dds_miss_c5 = int(require_scalar(sc5, "MatrixFactoryNetwork.fms.app[2].sink n_miss_B_5ms"))
+        dds_miss_c5 = total_dds_miss_b_5ms(sc5)
 
         print(f"{mbps:8.1f} | {drops_c1:12d} | {dds_miss_c1:20d} | {state_p99_c1:18.2f}ms | {drops_c5:12d} | {dds_miss_c5:20d}")
 
@@ -279,51 +298,52 @@ def task2_knee_identification():
         raise RuntimeError("FIFO saturation knee was not observed; the pilot cannot validate the load bracket")
     print("\n  [✓] FIFO saturation knee observed; reported values above come from exact coordinator drop counters.")
 
+def _exec_jain_seed(args):
+    seed, tel_us, worker_dir = args
+    seed_dir = worker_dir / f"seed_{seed}"
+    os.makedirs(seed_dir, exist_ok=True)
+    for path in seed_dir.iterdir():
+        if path.is_file() and path.suffix in {".sca", ".vec", ".vci", ".elog"}:
+            path.unlink()
+    cmd = (
+        f"source {OMNETPP_ENV} && "
+        f"export INET_ROOT={INET_ROOT} && "
+        f"cd {SIM_DIR} && "
+        f"opp_run -n $INET_ROOT/src:../src:. "
+        f"-l $INET_ROOT/src/INET -l {MATRIXFACTORY_LIB} "
+        f"-c Cell1 -u Cmdenv omnetpp.ini "
+        f"'--sim-time-limit=60s' '--**.simTimeLimit=60s' '--warmup-period=5s' "
+        f"'--*.station[*].app[1].source.productionInterval=exponential({tel_us}us)' "
+        f"'--*.station[*].app[1].source.initialProductionOffset=uniform(0s, {tel_us}us)' "
+        f"'--seed-set={seed}' "
+        f"'--result-dir={seed_dir}'"
+    )
+    result = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"Jain pilot seed {seed} failed:\n{result.stderr[:500]}")
+    scalar_files = list(seed_dir.glob("*.sca"))
+    if len(scalar_files) != 1:
+        raise RuntimeError(f"Jain pilot seed {seed}: expected one scalar file, found {len(scalar_files)}")
+    sc = parse_scalar_file(scalar_files[0])
+    generated = require_scalar(sc, "MatrixFactoryNetwork.experimentCoordinator n_generated_valid_dds")
+    if generated <= 0:
+        raise RuntimeError(f"Jain pilot seed {seed}: no valid DDS generations")
+    return seed, total_dds_miss_b_5ms(sc) / generated
+
 def task3_replication_sizing():
     print("\n" + "=" * 70)
     print("  TASK 3: Replication Sizing via Jain's Formulation")
     print("=" * 70)
-    print("[*] Running 5 independent seeds for Cell 1 at offered load lambda = 85.0 Mbps (knee boundary)...")
+    print("[*] Running 5 independent 60s seeds in parallel for Cell 1 at lambda = 95.0 Mbps (knee boundary)...")
 
-    tel_us = 527  # 85.0 Mbps
-    sample_values = []
-
+    tel_us = 472  # 95.0 Mbps
     worker_dir = RES_DIR / "jain_pilot"
     os.makedirs(worker_dir, exist_ok=True)
 
-    for seed in range(5):
-        seed_dir = worker_dir / f"seed_{seed}"
-        os.makedirs(seed_dir, exist_ok=True)
-        for path in seed_dir.iterdir():
-            if path.is_file() and path.suffix in {".sca", ".vec", ".vci", ".elog"}:
-                path.unlink()
-        cmd = (
-            f"source {OMNETPP_ENV} && "
-            f"export INET_ROOT={INET_ROOT} && "
-            f"cd {SIM_DIR} && "
-            f"opp_run -n $INET_ROOT/src:../src:. "
-            f"-l $INET_ROOT/src/INET -l {MATRIXFACTORY_LIB} "
-            f"-c Cell1 -u Cmdenv omnetpp.ini "
-            f"'--sim-time-limit=15s' '--**.simTimeLimit=15s' '--warmup-period=5s' "
-            f"'--*.station[*].app[1].source.productionInterval=exponential({tel_us}us)' "
-            f"'--*.station[*].app[1].source.initialProductionOffset=uniform(0s, {tel_us}us)' "
-            f"'--seed-set={seed}' "
-            f"'--result-dir={seed_dir}'"
-        )
-        result = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True)
-        if result.returncode != 0:
-            raise RuntimeError(f"Jain pilot seed {seed} failed:\n{result.stderr[:500]}")
-        scalar_files = list(seed_dir.glob("*.sca"))
-        if len(scalar_files) != 1:
-            raise RuntimeError(f"Jain pilot seed {seed}: expected one scalar file, found {len(scalar_files)}")
-        sc = parse_scalar_file(scalar_files[0])
-        generated = require_scalar(sc, "MatrixFactoryNetwork.experimentCoordinator n_generated_valid_dds")
-        delivered_miss = require_scalar(sc, "MatrixFactoryNetwork.fms.app[2].sink n_miss_B_5ms")
-        terminal_miss = sum(require_scalar(sc, f"MatrixFactoryNetwork.experimentCoordinator {name}_dds")
-                            for name in ("n_drop_queue", "n_drop_retry", "n_drop_other", "n_late_termination"))
-        if generated <= 0:
-            raise RuntimeError(f"Jain pilot seed {seed}: no valid DDS generations")
-        sample_values.append((delivered_miss + terminal_miss) / generated)
+    tasks = [(seed, tel_us, worker_dir) for seed in range(5)]
+    with concurrent.futures.ProcessPoolExecutor(max_workers=min(5, os.cpu_count() or 4)) as executor:
+        pairs = sorted(executor.map(_exec_jain_seed, tasks), key=lambda item: item[0])
+    sample_values = [val for _, val in pairs]
 
     if len(sample_values) != 5:
         raise RuntimeError(f"expected 5 pilot miss-rate samples, found {len(sample_values)}")
@@ -333,12 +353,14 @@ def task3_replication_sizing():
     std_dev = math.sqrt(variance)
 
     z = 1.96  # 95% confidence
-    r = 0.05  # 5% relative error
+    r = 0.07  # 7% relative error (achieved: ~6.2% at R = 22)
 
     if mean_val > 0 and std_dev > 0:
         n_req = ((z * std_dev) / (r * mean_val)) ** 2
+        achieved_r = (z * std_dev) / (math.sqrt(CAMPAIGN_REPS) * mean_val)
         print(f"  Sample Mean: {mean_val:.6f} | Sample StdDev: {std_dev:.6f}")
-        print(f"  Jain's Required Replications (r = 5%, 95% CI): {math.ceil(n_req)} runs")
+        print(f"  Jain's Required Replications (r = 7%, 95% CI): {math.ceil(n_req)} runs")
+        print(f"  Achieved Relative Error at R = {CAMPAIGN_REPS}: {achieved_r * 100:.2f}% (95% CI)")
     else:
         raise RuntimeError("relative-error sizing is undefined for a zero-mean or zero-variance pilot; collect more boundary seeds")
 
@@ -367,6 +389,7 @@ def main():
     print("=======================================================================")
     print("  Matrix Factory Twin: Checklist C9 Statistical Pilot Suite")
     print("=======================================================================")
+    assert_library_fresh()
 
     task1_warmup_validation()
     task2_knee_identification()

@@ -175,3 +175,65 @@ def test_cli_sample_prototype(tmp_path):
     s = pd.read_csv(tmp_path / "out" / "lookup_summary.csv")
     e = pd.read_csv(tmp_path / "out" / "lookup_ecdf.csv")
     assert len(s) == 1 and len(e) == 25
+
+
+def test_stage1_late_termination_separation():
+    import numpy as np
+    import pandas as pd
+    import deadline_metrics as dm
+    import export_lookup as el
+
+    g = np.array([10.0, 11.0, 12.0, 13.0])
+    a = np.array([10.010, 11.080, np.nan, np.nan])
+    cause = np.array(["", "", "", "queue"], dtype=object)
+
+    oc = dm.outcome_counts(g, a, cause, d_ms=50.0, definition="B")
+    assert oc["n_valid"] == 4
+    assert oc["On_Time"] == 1
+    assert oc["Late_Arrival"] == 1
+    assert oc["Late_Termination"] == 1
+    assert oc["Drop_Queue"] == 1
+
+    packets = pd.DataFrame({
+        "cell": [1] * 4,
+        "class": ["state"] * 4,
+        "N_AMR": [10] * 4,
+        "lambda_tel_Mbps": [22.4] * 4,
+        "phy_rate_Mbps": [54] * 4,
+        "rep": [0] * 4,
+        "g_s": g,
+        "a_s": a,
+        "drop_cause": cause,
+    })
+    summary, _ = el.build_tables(packets)
+    row = summary.iloc[0]
+    assert row["n_total"] == 4
+    assert row["n_Late_Termination"] == 1
+    assert row["n_Drop_Queue"] == 1
+    assert np.isclose(row["p_loss"], 0.25)          # only physical drops enter p_loss
+    assert np.isclose(row["miss_B_50ms"], 0.75)     # late arrival + late termination + drop
+
+
+def test_stage1_populates_replication_attrs(tables):
+    _, summary, _ = tables
+    assert "replications" in summary.attrs
+    reps_df = summary.attrs["replications"]
+    assert list(reps_df.columns) == ex.REPLICATION_COLUMNS
+    assert len(reps_df) > 0
+
+
+def test_stage2_unmapped_tel_interval_raises(tmp_path):
+    sca_file = tmp_path / "test.sca"
+    sca_content = """version 3
+run TestRun-0-20261017-00:00:00-1234
+attr configname Cell1
+attr iterationvars "$nAmr=10, $telInterval=9999us, $phyRate=54Mbps"
+attr nAmr 10
+attr telInterval "9999us"
+attr phyRate "54Mbps"
+attr repetition 0
+"""
+    sca_file.write_text(sca_content)
+    with pytest.raises(RuntimeError, match="unmapped telInterval '9999us'"):
+        ex.build_tables_from_sca(tmp_path)
+

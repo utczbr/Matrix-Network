@@ -25,3 +25,39 @@ def test_paired_contrast_identifies_wireless_dominance():
     assert result["wireless_gain"] == pytest.approx(0.20)
     assert result["wired_fifo_to_tas_gain"] == pytest.approx(0.05)
     assert result["dominant_bottleneck"] == "wireless"
+
+
+def test_uncongested_vs_saturated_tie_and_deadline_override():
+    import numpy as np
+    import pandas as pd
+    import bottleneck_migration as bm
+    import deadline_metrics as dm
+
+    rows = []
+    for n_amr, base_miss in [(5, 0.0), (80, 1.0)]:
+        for cell in range(1, 7):
+            for rep in range(3):
+                row = {
+                    "cell": cell,
+                    "class": "state",
+                    "N_AMR": n_amr,
+                    "lambda_tel_Mbps": 22.4,
+                    "phy_rate_Mbps": 54,
+                    "rep": rep,
+                }
+                for d in dm.D_SPECTRUM_MS:
+                    # At d=10ms, make Cell 1..6 show a wired bottleneck for N_AMR=5
+                    if d == 10 and n_amr == 5:
+                        row[f"miss_B_{d}ms"] = 0.40 if cell in (1, 2) else 0.0
+                    else:
+                        row[f"miss_B_{d}ms"] = base_miss
+                rows.append(row)
+
+    df = pd.DataFrame(rows)
+    out_nom = bm.build_contrasts(df).set_index("N_AMR")
+    assert out_nom.loc[5, "dominant_bottleneck"] == "none_or_uncongested"
+    assert out_nom.loc[80, "dominant_bottleneck"] == "mixed_or_uncertain"
+
+    out_10ms = bm.build_contrasts(df, deadline_ms=10).set_index("N_AMR")
+    assert out_10ms.loc[5, "dominant_bottleneck"] == "wired"
+    assert np.isclose(out_10ms.loc[5, "wired_fifo_to_tas_gain"], 0.40)

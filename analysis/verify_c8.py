@@ -3,7 +3,7 @@
 
 Verifies:
 1. AMR Spatial Placement Independence (RNG stream isolation, rng-2 vs rng-0).
-2. Offered Load Parity across Cells 1, 3, 5 (traffic source isolation, rng-1).
+2. Offered Load Parity across Cells 1, 2, 3, 5 (traffic source isolation, rng-1).
 3. GCL Gate State Timing in Cell 5 (exact microsecond window alignment).
 4. Packet Conservation Accounting in DeadlineSink.
 """
@@ -22,6 +22,7 @@ from env_config import (
     MATRIXFACTORY_LIB_STR as MATRIXFACTORY_LIB,
     PROJECT_ROOT_STR as PROJECT_ROOT,
     SIM_DIR_STR as SIM_DIR,
+    assert_library_fresh,
 )
 RES_DIR = os.path.join(SIM_DIR, "results", "verify_c8")
 
@@ -110,6 +111,7 @@ def main():
     if reuse_results:
         print(f"[*] Reusing existing results from {RES_DIR}")
     else:
+        assert_library_fresh()
         for c in cells:
             print(f"[*] Running {c} for 10s (repetition 0)...")
             extra = "'--**.generationEvents:vector(packetBytes).vector-recording=true'"
@@ -152,10 +154,11 @@ def main():
         sys.exit(1)
 
     # -------------------------------------------------------------------------
-    # Test 2: Offered Load Parity (Cell 1 FIFO vs Cell 3 Prio vs Cell 5 TAS)
+    # Test 2: Offered Load Parity (Cell 1, Cell 2 Sched, Cell 3 Prio, Cell 5 TAS)
     # -------------------------------------------------------------------------
-    print("\n[+] Verification 2: Offered Load Parity Across Cells 1, 3, and 5 (rng-1 Traffic)")
+    print("\n[+] Verification 2: Offered Load Parity Across Cells 1, 2, 3, and 5 (rng-1 Traffic)")
     sc_c1 = extract_scalars(sca_files["Cell1"])
+    sc_c2 = extract_scalars(sca_files["Cell2"])
     sc_c3 = extract_scalars(sca_files["Cell3"])
     sc_c5 = extract_scalars(sca_files["Cell5"])
 
@@ -170,26 +173,27 @@ def main():
 
     for label, metric in sources:
         v1 = required(sc_c1, metric)
+        v2 = required(sc_c2, metric)
         v3 = required(sc_c3, metric)
         v5 = required(sc_c5, metric)
-        if not (v1 == v3 == v5 and v1 > 0):
+        if not (v1 == v2 == v3 == v5 and v1 > 0):
             load_parity = False
-            print(f"  [!] Parity violation for {label}: C1={v1}, C3={v3}, C5={v5}")
+            print(f"  [!] Parity violation for {label}: C1={v1}, C2={v2}, C3={v3}, C5={v5}")
         else:
-            print(f"  [✓] {label:<22}: Exactly {int(v1)} packets generated in all 3 cells (C1=C3=C5).")
+            print(f"  [✓] {label:<22}: Exactly {int(v1)} packets generated in all 4 cells (C1=C2=C3=C5).")
 
     if load_parity:
-        print("  [✓] PASSED: Offered load parity verified bit-identical across wired configurations.")
+        print("  [✓] PASSED: Offered load parity verified bit-identical across wired and radio configurations.")
     else:
         print("  [✗] FAILED: Offered load diverged across cells.")
         sys.exit(1)
 
     vec_files = {}
     for filename in os.listdir(RES_DIR):
-        for cell in ("Cell1", "Cell3", "Cell5"):
+        for cell in ("Cell1", "Cell2", "Cell3", "Cell5"):
             if filename.startswith(cell + "-") and filename.endswith(".vec"):
                 vec_files[cell] = os.path.join(RES_DIR, filename)
-    if set(vec_files) != {"Cell1", "Cell3", "Cell5"}:
+    if set(vec_files) != {"Cell1", "Cell2", "Cell3", "Cell5"}:
         raise RuntimeError(f"missing offered-load vectors: found {sorted(vec_files)}")
     generated = {cell: extract_vectors(path) for cell, path in vec_files.items()}
     source_keys = sorted(key for key in generated["Cell1"]
@@ -200,7 +204,7 @@ def main():
         reference = [t for t, _ in generated["Cell1"][key]][:1000]
         if not reference:
             raise RuntimeError(f"empty generation vector {key}")
-        for cell in ("Cell3", "Cell5"):
+        for cell in ("Cell2", "Cell3", "Cell5"):
             candidate = [t for t, _ in generated[cell].get(key, [])][:1000]
             if candidate != reference:
                 raise RuntimeError(f"generation timestamps differ for {key[0]} between Cell1 and {cell}")
@@ -215,6 +219,9 @@ def main():
         ("FMS State Sink", "MatrixFactoryNetwork.fms.app[0].sink"),
         ("FMS Telemetry Sink", "MatrixFactoryNetwork.fms.app[1].sink"),
         ("FMS DDS Sink", "MatrixFactoryNetwork.fms.app[2].sink"),
+    ] + [
+        (f"AMR[{i}] Orders Sink", f"MatrixFactoryNetwork.amr[{i}].app[1].sink")
+        for i in range(10)
     ]
 
     for label, prefix in sinks:

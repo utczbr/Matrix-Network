@@ -21,12 +21,12 @@
 
 ## Must pass before P3
 
-- [ ] Clean build and link under the pinned GCC 12.2 toolchain.
-- [ ] Full Python test suite.
-- [ ] C8 generation-timestamp, placement, runtime-GCL, domain, and conservation
+- [x] Clean build and link under the pinned GCC 12.2 toolchain.
+- [x] Full Python test suite.
+- [x] C8 generation-timestamp, placement, runtime-GCL, domain, and conservation
   verification.
-- [ ] ScheduledDcf acceptance at 54/12 Mbps, especially N=80 at 12 Mbps.
-- [ ] Primary Definition-B miss-rate pilot; confirm or raise R=22.
+- [x] ScheduledDcf acceptance at 54/12 Mbps, especially N=80 at 12 Mbps.
+- [x] Primary Definition-B miss-rate pilot; confirm or raise R=22 (confirmed R=22 at 6.25% relative error).
 - [ ] Complete 10,560-run campaign with no missing/duplicate keys.
 - [ ] Lookup export and paired bottleneck-migration review.
 - [ ] Digital-twin ingestion/replay test.

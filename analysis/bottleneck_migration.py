@@ -22,7 +22,9 @@ def _effect(values: np.ndarray) -> tuple[float, float]:
     return float(np.mean(values)), dm.student_t_halfwidth(values)
 
 
-def build_contrasts(replications: pd.DataFrame) -> pd.DataFrame:
+def build_contrasts(replications: pd.DataFrame, deadline_ms: int | None = None) -> pd.DataFrame:
+    if deadline_ms is not None and deadline_ms not in dm.D_SPECTRUM_MS:
+        raise ValueError(f"deadline_ms must be one of {dm.D_SPECTRUM_MS}, got {deadline_ms}")
     required = {"cell", "rep", *CONDITION}
     required.update(f"miss_B_{d}ms" for d in dm.D_SPECTRUM_MS)
     missing = sorted(required - set(replications.columns))
@@ -32,7 +34,8 @@ def build_contrasts(replications: pd.DataFrame) -> pd.DataFrame:
     rows = []
     for condition, group in replications.groupby(CONDITION, sort=True):
         cls = condition[0]
-        metric = f"miss_B_{dm.NOMINAL_D_MS[cls]}ms"
+        d_eval = dm.NOMINAL_D_MS[cls] if deadline_ms is None else int(deadline_ms)
+        metric = f"miss_B_{d_eval}ms"
         pivot = group.pivot(index="rep", columns="cell", values=metric)
         if set(pivot.columns) != set(range(1, 7)) or pivot.isna().any().any():
             raise ValueError(f"unpaired or incomplete six-cell data for {condition}")
@@ -50,7 +53,9 @@ def build_contrasts(replications: pd.DataFrame) -> pd.DataFrame:
         priority_mean, priority_ci = _effect(priority.to_numpy())
         tas_mean, tas_ci = _effect(tas_after_priority.to_numpy())
         difference_mean, difference_ci = _effect(difference.to_numpy())
-        if difference_mean - difference_ci > 0:
+        if np.all(pivot.to_numpy() == 0.0):
+            dominant = "none_or_uncongested"
+        elif difference_mean - difference_ci > 0:
             dominant = "wireless"
         elif difference_mean + difference_ci < 0:
             dominant = "wired"
@@ -79,8 +84,10 @@ def main(argv=None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("replications_csv", type=Path)
     parser.add_argument("--out", type=Path, default=Path("bottleneck_migration.csv"))
+    parser.add_argument("--deadline-ms", type=int, default=None,
+                        help="override class nominal deadline with a fixed D from D_SPECTRUM_MS")
     args = parser.parse_args(argv)
-    result = build_contrasts(pd.read_csv(args.replications_csv))
+    result = build_contrasts(pd.read_csv(args.replications_csv), deadline_ms=args.deadline_ms)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     result.to_csv(args.out, index=False)
     print(f"wrote {len(result)} paired contrast rows to {args.out}")

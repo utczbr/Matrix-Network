@@ -59,3 +59,23 @@ MATRIXFACTORY_LIB = Path(os.environ.get("MATRIXFACTORY_LIB") or PROJECT_ROOT / "
 if _local_cfg is not None and hasattr(_local_cfg, "MATRIXFACTORY_LIB"):
     MATRIXFACTORY_LIB = Path(_local_cfg.MATRIXFACTORY_LIB)
 MATRIXFACTORY_LIB_STR = str(MATRIXFACTORY_LIB)
+
+
+def assert_library_fresh() -> None:
+    """Fail fast if libmatrixfactory.so is missing or older than any src/ file."""
+    so_path = PROJECT_ROOT / "libmatrixfactory.so"
+    if not so_path.exists():
+        raise RuntimeError(
+            f"Shared library {so_path} is missing. Run 'make -j$(nproc)' first."
+        )
+    so_mtime = so_path.stat().st_mtime
+    src_dir = PROJECT_ROOT / "src"
+    stale = [
+        p.name for p in src_dir.iterdir()
+        if p.is_file() and p.suffix in {".cc", ".h", ".msg", ".ned"} and p.stat().st_mtime > so_mtime
+    ]
+    if stale:
+        raise RuntimeError(
+            f"Shared library {so_path.name} is older than {sorted(stale)}. "
+            f"Run 'make -j$(nproc)' first."
+        )

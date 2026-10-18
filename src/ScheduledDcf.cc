@@ -45,6 +45,8 @@ void ScheduledDcf::initialize(int stage)
         slotStartTimer = new cMessage("slotStartTimer");
 
         WATCH(numSlotDeferrals);
+        WATCH(numDeferredOnEnqueue);
+        WATCH(numGrantReleased);
         WATCH(numGrantedInSlot);
         EV_INFO << "ScheduledDcf " << getFullPath() << " slotStartOffset=" << slotStartOffset
                 << " superframe=" << superframeDuration << " slotDur=" << slotDuration << endl;
@@ -74,8 +76,19 @@ bool ScheduledDcf::isWithinActiveSlot(simtime_t now) const
         int64_t slotStartRaw = slotStartOffsetRaw + m * slotStrideRaw;
         int64_t slotEndRaw = slotStartRaw + slotDurationRaw;
 
-        if (deltaRaw >= slotStartRaw && (slotEndRaw - deltaRaw) >= reqSecRaw) {
-            return true;
+        if (deltaRaw >= slotStartRaw && deltaRaw < slotEndRaw) {
+            // Found containing slot m. Extend to the end of any contiguous assigned slots.
+            int64_t blockEndRaw = slotEndRaw;
+            for (int k = m + 1; k < numAssignedSlots; ++k) {
+                int64_t nextStartRaw = slotStartOffsetRaw + k * slotStrideRaw;
+                if (nextStartRaw == blockEndRaw) {
+                    blockEndRaw = nextStartRaw + slotDurationRaw;
+                }
+                else {
+                    break;
+                }
+            }
+            return (blockEndRaw - deltaRaw) >= reqSecRaw;
         }
     }
     return false;
@@ -159,6 +172,7 @@ void ScheduledDcf::processUpperFrame(Packet *packet, const Ptr<const Ieee80211Da
         // and arm slotStartTimer for our next slot boundary.
         channelAccess->getPendingQueue()->enqueuePacket(packet);
         numSlotDeferrals++;
+        numDeferredOnEnqueue++;
         scheduleNextSlotTimer(simTime());
     }
 }
@@ -172,6 +186,7 @@ void ScheduledDcf::channelGranted(IChannelAccess *grantedAccess)
         // Channel was granted outside our assigned slot (or too close to slot end):
         // immediately release without transmitting and wait for our next slot.
         numSlotDeferrals++;
+        numGrantReleased++;
         channelAccess->releaseChannel(this);
         if (!channelAccess->getPendingQueue()->isEmpty())
             scheduleNextSlotTimer(simTime());
@@ -204,6 +219,8 @@ void ScheduledDcf::finish()
 {
     cSimpleModule::finish();
     recordScalar("scheduledDcf_numSlotDeferrals", numSlotDeferrals);
+    recordScalar("scheduledDcf_numDeferredOnEnqueue", numDeferredOnEnqueue);
+    recordScalar("scheduledDcf_numGrantReleased", numGrantReleased);
     recordScalar("scheduledDcf_numGrantedInSlot", numGrantedInSlot);
 }
 

@@ -79,6 +79,10 @@ int64_t DeadlineSink::computeConsumptionTickRaw(int64_t gRaw, int64_t leadRaw, i
 
 simtime_t DeadlineSink::extractCreationTime(const Packet *packet)
 {
+    const auto expTags = packet->getAllRegionTags<ExperimentPacketTag>();
+    if (!expTags.empty() && expTags.front().getTag()->getGenerationTime() >= SIMTIME_ZERO) {
+        return expTags.front().getTag()->getGenerationTime();
+    }
     for (int i = 0; i < packet->getNumRegionTags(); ++i) {
         auto tag = packet->getRegionTag(i);
         if (auto creationTag = dynamicPtrCast<const CreationTimeTag>(tag)) {

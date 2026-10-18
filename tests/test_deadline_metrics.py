@@ -87,7 +87,7 @@ def test_bins_are_exhaustive_and_exclusive():
     a = np.array([10.002, 11.100, np.nan, np.nan, np.nan, np.nan, 16.003, 1.002])
     cause = np.array(["", "", "queue", "retry", "other", "", "", ""], dtype=object)
     oc = dm.outcome_counts(g, a, cause, 50, definition="A")
-    assert oc == {"n_valid": 7, "On_Time": 2, "Late_Arrival": 2,
+    assert oc == {"n_valid": 7, "On_Time": 2, "Late_Arrival": 1, "Late_Termination": 1,
                   "Drop_Queue": 1, "Drop_Retry": 1, "Drop_Other": 1}
 
 
@@ -157,3 +157,40 @@ def test_common_horizon_puts_every_deadline_on_one_packet_set():
     assert np.isnan(dm.miss_rate(g, a, 1, definition="A", horizon_lead_ms=100))   # c(L=100) = 60.05 s > limit
     oc = dm.outcome_counts(g, a, np.array([""], dtype=object), 1, definition="A", horizon_lead_ms=100)
     assert oc["n_valid"] == 0
+
+
+def test_stage1_late_termination_separation():
+    import numpy as np
+    import pandas as pd
+    import deadline_metrics as dm
+    import export_lookup as el
+
+    g = np.array([10.0, 11.0, 12.0, 13.0])
+    a = np.array([10.010, 11.080, np.nan, np.nan])
+    cause = np.array(["", "", "", "queue"], dtype=object)
+
+    oc = dm.outcome_counts(g, a, cause, d_ms=50.0, definition="B")
+    assert oc["n_valid"] == 4
+    assert oc["On_Time"] == 1
+    assert oc["Late_Arrival"] == 1
+    assert oc["Late_Termination"] == 1
+    assert oc["Drop_Queue"] == 1
+
+    packets = pd.DataFrame({
+        "cell": [1] * 4,
+        "class": ["state"] * 4,
+        "N_AMR": [10] * 4,
+        "lambda_tel_Mbps": [22.4] * 4,
+        "phy_rate_Mbps": [54] * 4,
+        "rep": [0] * 4,
+        "g_s": g,
+        "a_s": a,
+        "drop_cause": cause,
+    })
+    summary, _ = el.build_tables(packets)
+    row = summary.iloc[0]
+    assert row["n_total"] == 4
+    assert row["n_Late_Termination"] == 1
+    assert row["n_Drop_Queue"] == 1
+    assert np.isclose(row["p_loss"], 0.25)          # only physical drops enter p_loss
+    assert np.isclose(row["miss_B_50ms"], 0.75)     # late arrival + late termination + drop

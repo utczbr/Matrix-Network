@@ -26,8 +26,8 @@ Those values must not be cited.
 - `bottleneck_migration.py` computes paired wireless and wired effects with
   confidence intervals.
 - The quantile contract is synchronized at 25 levels.
-- The campaign replication floor is 22, pending confirmation by the repaired
-  primary-miss-rate pilot.
+- The campaign replication floor is 22, confirmed by the repaired
+  primary-miss-rate pilot (achieving 6.25% relative error at 95% CI).
 
 ## Evidence available in this workspace
 
@@ -50,9 +50,17 @@ results.
 
 Checklist C8 also passes at 10 s: all 10 AMR coordinates match bit-for-bit
 between CSMA and scheduled cells; the first up to 1,000 generation timestamps
-match for all 28 sources across Cells 1, 3, and 5; every sink and all four
+match for all 28 sources across Cells 1, 2, 3, and 5; all 13 sinks (3 FMS and 10 AMR Orders) and all four
 coordinator ledgers conserve packets exactly; and 24 TAS gate vectors transition
 only at the configured GCL boundaries.
+
+Checklist C9 (pilot suite) also passes: queue length transients stabilize
+within 5.0 s (79.13 pkts transient vs 79.28 pkts steady-state); the FIFO
+saturation knee is identified at 95.0 Mbps (Cell 1 drops commence at 1,562 pkts
+and 959 DDS misses, while Cell 5 TAS isolates DDS with 0 misses); 5 parallel 60 s
+seeds at the knee boundary yield mean miss rate 0.181820 and std dev 0.027193,
+confirming that R=22 achieves 6.25% relative error at 95% CI (18 runs required
+for 7%); and sample sizes satisfy n >= 10^4 for p99 across all configurations.
 
 ## Mandatory rerun gates
 

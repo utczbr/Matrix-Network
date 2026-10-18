@@ -16,9 +16,9 @@ draw local phases. Consumption uses exact raw-time arithmetic:
 | `ExperimentCoordinator::handlePacketCreated` | Classifies sources, assigns packet IDs, applies generation-time filters, and attaches the persistent tag. |
 | `ExperimentCoordinator::handleQueueEvent` | Records the AP and TSN queue boundary timestamps used by the delay decomposition. |
 | `ExperimentCoordinator::handlePacketDropped` / `finish` | Classifies terminal outcomes and records pending packets as late terminations at simulation end. |
-| `DeadlineSink::consumePacket` | Applies the receive-side filters, evaluates A/B misses, records ZOH staleness or TTL expiration, and registers valid deliveries. |
+| `DeadlineSink::consumePacket` | Extracts generation time from `ExperimentPacketTag` (falling back to `CreationTimeTag`), applies the receive-side filters, evaluates A/B/`B^T` misses, records ZOH staleness or TTL expiration, and registers valid deliveries. |
 | `DeadlineSink::recordDomainBreakdown` | Checks required boundaries and splits valid end-to-end delay into wireless, switch, and residual segments. |
-| `DeadlineSink::finish` | Writes counters, histograms, and conditional delivery-delay quantiles. |
+| `DeadlineSink::finish` | Writes conservation counters, per-deadline/per-tick miss scalars (`n_miss_A_<D>ms`, `n_miss_B_<D>ms`, `n_miss_B_<D>ms_T<T>ms`, `n_miss_BT_L_eq_T<T>ms`, `n_late_discarded_ttl`), domain/staleness histograms (`stalenessTicks_<T>ms`), and conditional delivery-delay quantiles. |
 | `ExperimentPacketTag.msg` | Defines the persistent packet identity, class, validity, generation time, and domain-boundary fields. |
 
 `computeConsumptionTickRaw` in both C++ modules implements ceiling division in raw `simtime_t` units. Keep the coordinator and sink filters aligned: the coordinator marks valid generations, while the sink independently checks received packets and the exporter audits that both ledgers agree.

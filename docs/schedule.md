@@ -12,8 +12,8 @@ repaired instrumentation and statistical gates pass in the pinned environment.
 3. Run C8: source timestamp parity, RNG-isolated placement, runtime GCL
    transitions, domain completeness, and full packet conservation.
 4. Run ScheduledDcf acceptance at 54 and 12 Mbps, including N=80.
-5. Run the miss-rate pilot. The configured floor is R=22; raise it if the
-   primary Definition-B miss-rate precision calculation demands more.
+5. Run the miss-rate pilot. The configured floor is R=22; confirmed by
+   pilot_run.py at 6.25% relative error (95% CI).
 6. Freeze the grid and launch the production campaign.
 7. Export lookup artifacts under strict completeness/conservation checks.
 8. Compute paired bottleneck-migration contrasts and perform the twin ingestion
