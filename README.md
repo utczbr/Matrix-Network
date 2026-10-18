@@ -6,7 +6,7 @@ IEEE 802.1Qbv TAS) with two radio regimes (802.11 DCF and conflict-free
 scheduled access).
 
 - Institution: Universidade Federal de Santa Catarina (UFSC), INE
-- Authors: Breno da Silva Pereira, Gabriel S. Stuart, Lucas de Mello Kindermann
+- Authors: Breno da Silva Pereira, Gabriel S. Stuart
 - Advisor: Prof. Dr. Antônio Augusto Medeiros Fröhlich
 - Status: campaign-readiness repairs implemented; the full validation suite and
   production campaign must be rerun before empirical claims are accepted
