@@ -1,7 +1,7 @@
 """Lookup-table export for the digital twin's NER engine (decisions.md section 5, Q3).
 
 Supports TWO ingestion modes:
-1. Stage 1 (--packets): Per-packet CSV table (used by the 41-test unit suite and pilot debug runs).
+1. Stage 1 (--packets): Per-packet CSV table (used by the 51-test unit suite and pilot debug runs).
 2. Stage 2 (--sca-dir): Campaign-scale OMNeT++ .sca files produced by
    DeadlineSink and ExperimentCoordinator across Cell1_Sweep..Cell6_Sweep,
    enforcing the strict Packet Conservation Audit Gate.

@@ -1,14 +1,10 @@
 # Validation and Results Status
 
-**Revision:** October 15, 2026
+**Revision:** October 18, 2026
 
-Implementation responsibilities are mapped in the corresponding `docs/SPEC-*.md` files. This documentation update adds no new empirical evidence.
+Implementation responsibilities are mapped in the corresponding `docs/SPEC-*.md` files. Pre-production acceptance suites and the statistical pilot campaign are validated and recorded below; full-scale production results (the 10,560-run sweep) remain pending campaign execution.
 
-No production result is currently claimed. Earlier pilot numbers in this file
-were invalidated because the scalar exporter substituted zero for all physical
-drop counts, the retry verifier matched both packet counts and byte sums, and
-the scheduled 12 Mbps allocation was underprovisioned at N=20, 40, and 80.
-Those values must not be cited.
+No production campaign result is currently claimed. Historical pilot numbers prior to October 15, 2026 were superseded because the earlier scalar exporter substituted zero for physical drop counts, the retry verifier matched byte sums to packet counts, and the scheduled 12 Mbps allocation was underprovisioned. The repaired acceptance and pilot results reported below reflect the corrected, verified toolchain and accounting rules.
 
 ## Implemented repairs
 
