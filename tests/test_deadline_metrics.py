@@ -196,8 +196,8 @@ def test_stage1_late_termination_separation():
     assert np.isclose(row["miss_B_50ms"], 0.75)     # late arrival + late termination + drop
 
 def test_retrospective_profile_and_residual_shift():
-    """Verify additive hardware/channel residual shift (Soft-W-TSN RST / Wi-STARK tau_ina)
-    and 20 Hz VDA 5050 teleoperation profile evaluation on the 25-quantile grid.
+    """Verify the additive delay-perturbation parameter ``shift_ms`` (residual queuing/forwarding
+    sensitivity) and alternative contract evaluation on the 25-quantile grid.
     """
     delays = np.linspace(1.0, 25.0, len(dm.QUANTILE_LEVELS))
     base = dm.evaluate_retrospective_profile(delays, p_loss=0.0, d_ms=20.0, tick_ms=10.0, shift_ms=0.0)

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Verification script to check consistency between simulations/omnetpp.ini and docs/parameters.md.
+"""Verification script to check consistency between simulations/omnetpp.ini,
+docs/parameters.md, and the evidence-matrix characterization rules.
 
 Detects parameter drift between configuration and documentation sheets.
 Usage:
@@ -12,6 +13,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 INI_PATH = REPO_ROOT / "simulations" / "omnetpp.ini"
 PARAMS_MD_PATH = REPO_ROOT / "docs" / "parameters.md"
+CAPACITY_MD_PATH = REPO_ROOT / "docs" / "capacity.md"
+
 
 def parse_ini_sections(ini_file):
     """Parse INI entries into {(section, key): value} with continuation-line support."""
@@ -35,6 +38,84 @@ def parse_ini_sections(ini_file):
             k, v = line.split("=", 1)
             kv[(section, k.strip())] = v.strip()
     return kv
+
+
+EVIDENCE_LABELS = ("Paper", "Derive", "Choice", "Standard", "Verify")
+CLASS_ROWS = ("Orders", "State", "DDS", "Telemetry")
+FIVE_PART_HEADERS = ("Role & Endpoints", "Message Schema & Size", "Generation Process",
+                     "Transport, Framing & Middleware", "Application Deadline & Late Treatment")
+# Per class, label(s) that must appear in the class's own table row, and facts that must stay in sync with the INI.
+ROW_REQUIRED = {
+    "Orders":    ("Choice", "Paper", "Verify", "600 B", "5051"),
+    "State":     ("Choice", "Paper", "Verify", "1000 B", "5050"),
+    "DDS":       ("Choice", "Paper", "Verify", "200 B", "5100", "88 B"),
+    "Telemetry": ("Choice", "Verify", "1400 B", "5200"),
+}
+# Stale claims that earlier drafts contained; they must not reappear in the parameter sheet or capacity sheet.
+FORBIDDEN = (
+    ("56 B RTPS", "fabricated RTPS header breakdown (use Profanter 2019 88 B)"),
+    ("co-located broker", "model has no broker process"),
+    ("2.56", "wrong VDA path range (E = N - 1 gives 2124..11532 B)"),
+    ("11.97 KB", "wrong VDA path range"),
+)
+
+
+def check_characterization_evidence(params_text):
+    """Audit docs/parameters.md section 6.3 (5-part characterization + evidence labels) and docs/capacity.md."""
+    ok = True
+    m = re.search(r"### 6\.3 Evidence-Graded 5-Part Characterization.*?(?=\n---\n|\n## )", params_text, re.S)
+    if not m:
+        print("  [-] docs/parameters.md: section '6.3 Evidence-Graded 5-Part Characterization' not found")
+        return False
+    sec = m.group(0)
+    header = next((l for l in sec.splitlines() if l.startswith("|") and "Role" in l), "")
+    for h in FIVE_PART_HEADERS:
+        if h not in header:
+            print(f"  [-] 6.3 table header is missing part {h!r}")
+            ok = False
+    rows = {c: next((l for l in sec.splitlines() if l.startswith(f"| **{c}**")), None) for c in CLASS_ROWS}
+    for cls, row in rows.items():
+        if row is None:
+            print(f"  [-] 6.3 has no row for class {cls!r}")
+            ok = False
+            continue
+        for need in ROW_REQUIRED[cls]:
+            if need not in row:
+                print(f"  [-] 6.3 row {cls!r} lacks {need!r}")
+                ok = False
+        if row.count("|") < 7:
+            print(f"  [-] 6.3 row {cls!r} does not have the six table cells")
+            ok = False
+    for label in EVIDENCE_LABELS:
+        if f"**{label}**" not in sec and f"{label}" not in sec:
+            print(f"  [-] evidence label {label!r} absent from 6.3")
+            ok = False
+    if CAPACITY_MD_PATH.exists():
+        cap = CAPACITY_MD_PATH.read_text(encoding="utf-8")
+        for label in EVIDENCE_LABELS:
+            if label not in cap:
+                print(f"  [-] evidence label {label!r} absent from docs/capacity.md (regenerate with analysis/capacity.py)")
+                ok = False
+        for cls in CLASS_ROWS:
+            if f"**{cls}**" not in cap:
+                print(f"  [-] docs/capacity.md section 5 has no {cls!r} row (regenerate with analysis/capacity.py)")
+                ok = False
+        for bad, why in FORBIDDEN:
+            for name, txt in (("docs/capacity.md", cap), ("docs/parameters.md", params_text)):
+                if bad in txt:
+                    print(f"  [-] {name} still contains {bad!r}: {why}")
+                    ok = False
+    else:
+        print("  [-] docs/capacity.md missing; run: python3 analysis/capacity.py --out docs/capacity.md")
+        ok = False
+    # Item 7 attribution must stay with the twin contract.
+    if "Java" not in sec or "DeadlineSink" not in sec:
+        print("  [-] 6.3 lacks the Item 7 attribution to the Java twin contract / DeadlineSink.cc")
+        ok = False
+    if ok:
+        print("  [+] Verified 5-part characterization structure, evidence labels and Item 6/7 attribution")
+    return ok
+
 
 def check_parameters():
     print(f"[*] Checking {INI_PATH.relative_to(REPO_ROOT)} against {PARAMS_MD_PATH.relative_to(REPO_ROOT)}...")
@@ -77,6 +158,9 @@ def check_parameters():
             print(f"  [-] Mismatch [{section}] {key}: INI={val!r} (expected {expected_ini!r}), doc_match={doc_ok}")
             all_passed = False
 
+    if not check_characterization_evidence(params_text):
+        all_passed = False
+
     if all_passed:
         print("[✓] Consistency check passed: all checked baseline parameters are documented in docs/parameters.md.")
     else:
@@ -84,5 +168,7 @@ def check_parameters():
         return False
     return True
 
+
 if __name__ == "__main__":
     sys.exit(0 if check_parameters() else 1)
+

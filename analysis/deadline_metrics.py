@@ -1,27 +1,30 @@
-"""Deadline-miss metrics for the Matrix Factory Twin study.
+"""Deadline-miss metrics and offline quantile evaluators for the Matrix Factory Twin study.
 
-Implements only what is closed in docs/decisions.md (Oct 14, 2026):
+Implements the application-consumption and statistical contract closed in
+docs/decisions.md and traffic_class_evidence_matrix.md (Item 7: Choice + Verify):
 
-* Definition A (relative deadline, section 1.2) and Definition B (tick-grid
-  consumption instant, sections 1.3 / 1.3.1: c = phi + ceil((g + L - phi) / T) * T,
-  on time iff a <= c, non-strict). Working lead time L = D; the maintainers' variant
-  L = T for State/Telemetry is obtained by passing ``lead_ms=tick_ms``.
-* Per-replication tick-grid phase phi (section 1.8): c = phi + ceil((g + L - phi) / T) * T.
-* Accounting filters (section 1.5): discard g < warm-up, discard c > sim-time-limit,
-  mutually exclusive bins On_Time / Late_Arrival / Late_Termination / Drop_Queue / Drop_Retry / Drop_Other.
-* Staleness in ticks for delivered State/Telemetry packets (section 1.1).
-* Offline evaluation of Miss_A / Miss_B from the stored delay quantile table, so
-  other T, other L, other D, and additive hardware/channel residual shifts (shift_ms
-  for Soft-W-TSN COTS Residual Service Time or Wi-STARK tau_ina) need no re-run.
-* Student-t confidence interval over replications and Wilson upper bounds for
-  boundary proportions (section 1.6).
-
-Time handling: inputs are float seconds (OMNeT++ vector values); they are rounded
-to integer picoseconds (OMNeT++'s default simtime resolution) so that the ceiling
-and the non-strict boundary are exact, with no floating-point surprises.
-
-The simulator owns TTL accounting and INET drop-signal classification; this
-module applies the same outcome definitions to Stage-1 packet tables.
+* Definition A (continuous relative transport deadline, section 1.2) and
+  Definition B (discrete NER tick-grid consumption instant, sections 1.3 / 1.3.1:
+  c = phi_T + ceil((g - phi_T + L_c) / T) * T, on time iff a <= c, non-strict).
+  These rules reflect the Java twin's Time Management Component (MainSimulator.java)
+  rather than generic VDA 5050, DDS, OPC UA, or MQTT protocol specifications.
+* Working lead time L_c = D_c; the maintainers' freshness variant L_c = T for
+  State/Telemetry is obtained by passing ``lead_ms=tick_ms``.
+* Replication-global tick-grid phase phi_T ~ U(0, T) drawn on Stream 1 (rng-1)
+  (section 1.8): identical across all sinks and paired cells within a replication.
+* Accounting filters (section 1.5): discard g < warm-up (5.0 s), discard
+  c(g, L_horizon=100 ms, T_0=10 ms, phi_0) > sim-time-limit (60.0 s), and
+  partition valid generations into six mutually exclusive bins:
+  On_Time / Late_Arrival / Late_Termination / Drop_Queue / Drop_Retry / Drop_Other.
+* Discrete staleness in ticks for delivered State/Telemetry packets under
+  Zero-Order Hold (section 1.1).
+* Offline evaluation of Miss_A / Miss_B from the 25-point conditional delivery
+  delay quantile table (Eq. 10), including additive delay-perturbation shifts
+  (``shift_ms >= 0``) for sensitivity analysis (e.g., domain-translation overhead
+  or Wagner et al.'s proposed 20 Hz teleoperation extension) without re-running
+  OMNeT++.
+* Replication-level Student-t confidence intervals and pooled Wilson score upper
+  bounds for zero-miss boundary regimes (section 1.6).
 """
 from __future__ import annotations
 
@@ -43,8 +46,8 @@ QUANTILE_LEVELS = (0.000, 0.010, 0.020, 0.050, 0.100, 0.150, 0.200, 0.250,
 NOMINAL_D_MS = {"orders": 50, "dds": 5, "state": 50, "telemetry": 100}  # Tier 1 markers (Q2)
 T_PRIMARY_MS = 10                                                 # T_min (Q1, maintainer-confirmed)
 T_OFFLINE_MS = (50, 500)                                          # offline sensitivity
-WARMUP_S = 5.0                                                    # placeholder in omnetpp.ini
-SIM_LIMIT_S = 60.0                                                # placeholder in omnetpp.ini
+WARMUP_S = 5.0                                                    # omnetpp.ini warmup-period
+SIM_LIMIT_S = 60.0                                                # omnetpp.ini sim-time-limit
 
 DROP_BINS = {"queue": "Drop_Queue", "retry": "Drop_Retry", "other": "Drop_Other"}
 
@@ -242,9 +245,9 @@ def evaluate_retrospective_profile(
     shift_ms: float = 0.0,
     levels: Sequence[float] = QUANTILE_LEVELS,
 ) -> Dict[str, float]:
-    """Retrospectively evaluate external protocol profiles (e.g., 20 Hz VDA 5050 teleoperation,
-    Soft-W-TSN COTS Residual Service Time ``shift_ms=rst_ms``, or Wi-STARK channel-switching
-    inaccessibility ``shift_ms=tau_ina_ms``) directly from the 25 exported conditional delay quantiles.
+    """Evaluate alternative consumption contracts (lead_ms, tick_ms, d_ms) or additive
+    delay perturbations (shift_ms >= 0, e.g., domain-translation latency or proposed
+    teleoperation cadence sensitivity) offline from the 25 exported delay quantiles.
     """
     eff_lead = d_ms if lead_ms is None else float(lead_ms)
     return {

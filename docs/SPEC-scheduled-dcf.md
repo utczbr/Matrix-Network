@@ -75,3 +75,12 @@ the tight stress case.
 - Maximum State delay satisfies the configured superframe bound plus the stated
   wired margin; the N=80 cycle must not exceed the 90 ms minimum interarrival.
 - The N=80, 12 Mbps cell completes without persistent scheduled backlog.
+
+## Contiguous AP Slot Merging and Operating Boundaries (Item 6 & C8)
+
+1. **Contiguous Downlink Block Admission (`ScheduledDcf::isWithinActiveSlot`):**
+   `isWithinActiveSlot` merges contiguous slots assigned to the same station (`nextStartRaw == blockEndRaw`). Consequently, at 12 Mbps, the single-slot duration $s_{\text{AP}} = 560\ \mu\text{s}$ (`requiredExchangeTime = 550 us`) bounds the entire AP downlink window only when `numAssignedSlots == 1` ($N \in \{5, 10\}$); for $N \in \{20, 40, 80\}$, the AP merges $K \in \{3, 10, 39\}$ contiguous slots into a single window of $1.68\ \text{ms}$, $5.60\ \text{ms}$, or $21.84\ \text{ms}$, and the $550\ \mu\text{s}$ remaining-time check applies only at the trailing edge of the merged block.
+2. **Schedule Operating Limit at $N = 80, 12\ \text{Mbps}$ (Item 6):**
+   At $N = 80, 12\ \text{Mbps}$, the superframe is $T_{\text{super}} = 90\ \text{ms}$ ($89.84\ \text{ms}$ occupied), which keeps per-AMR service ($11.11\ \text{pkts/s}$) above the $10\ \text{Hz}$ offered `State` rate and meets the $100\ \text{ms}$ deadline threshold with zero collisions, but exceeds the nominal $D_{\text{state}} = 50\ \text{ms}$ budget (yielding a maximum observed `State` delay of $90.876\ \text{ms}$ in `verify_spike_s1.py`). This is documented as an explicit operating limit of the configured single-slot-per-AMR schedule at $12\ \text{Mbps}$ for a $50\ \text{ms}$ budget, not a general impossibility bound for static TDMA or wireless TSN.
+3. **Phase lattice (C9).** The ideal slot-start lattice modulo the `1000 us` GCL has `1000 / gcd(s_AMR, 1000)` residues (`5` at 54 Mbps, `20` at 12 Mbps); a fleet of `N` populates at most `min(N, 5)` or `min(N, 20)` of them, before airtime and AP forwarding shift actual switch arrivals.
+4. **Operating-limit matrix.** `docs/capacity.md` §6 lists, for every `(N, PHY)` pair and `D in {1, 2, 5, 10, 20, 50, 100} ms`, whether `T_super <= D`; the implied miss fractions are uniform-phase estimates (`Derive`), not measurements.

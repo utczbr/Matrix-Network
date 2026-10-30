@@ -2,19 +2,26 @@
 
 Reads ``[Config Wired_TAS]`` (gate durations/offsets) and the application packet
 lengths from the INI, then verifies the facts documented as "Verified (analytic)"
-in docs/parameters.md section 8 and docs/decisions.md section 6:
+in docs/parameters.md section 8, docs/decisions.md section 6, and
+traffic_class_evidence_matrix.md:
 
 * the four windows are disjoint, inside the cycle and the durations add up to the cycle;
 * the windows match the intended schedule (Orders [0,100), DDS [100,300), State
   [300,500), Telemetry [500,1000) us), using the convention of the INI comment:
   durations=[w, cycle-w], initiallyOpen=true, offset = cycle - start (mod cycle);
-* frames per window (INET's implicit guard band: a frame must finish inside the
-  window), identical with and without the 4 B C-tag;
-* the telemetry payload ceiling (4 x 1400 B per 1 ms = 44.8 Mbps);
-* the latest in-window start time of one frame (State: 500 - 85.6 = 414.4 us, checklist C6);
-* physical guard-band byte limits and 4-protocol (VDA 5050, DDS-RTPS, OPC UA UADP,
-  MQTT) TSN validation invariants (head-of-line deadlock proof for MTU-fragmented
-  multi-node VDA 5050 orders in TC3);
+* frames per window under INET 4.7.0 PeriodicGate's implicit guard band, evaluated
+  for two accounting conventions: L2 frame bits (UDP+IP+[C-tag]+MAC+FCS = +46/+50 B)
+  and full physical wire occupancy (+8 B preamble/SFD + 12 B IFG = +66/+70 B).
+  Orders/State/Telemetry give the same integer count (1/2/4) under both; DDS does NOT
+  (9 on the wire, 10 under L2 only: 250 B = 20.0 us -> 200/20 = 10).  The repository
+  documents the wire convention (9); which convention INET really applies is the
+  open in-simulation item of checklist C8 and is reported, not assumed, here;
+* full IP MTU (1500 B IP packet = 1518/1522 B L2 frame = 1538/1542 B wire occupancy,
+  requiring 121.44..123.36 us at 100 Mbps) vs. the 100 us TC3 window (and why even
+  a 120 us window is insufficient for full-MTU frames);
+* corrected VDA 5050 path-graph scaling (Wagner et al., 2026: simple path E = N - 1),
+  Fast-RTPS framing benchmark (Profanter et al., 2019: +88 B UDP payload overhead),
+  and telemetry payload ceiling (4 x 1400 B per 1 ms = 44.8 Mbps);
 * window occupancy for the offered load of the sweep (informational).
 
 It does NOT replace the in-simulation check of checklist C8 (record gateState:vector
@@ -32,20 +39,23 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 LINK_MBPS = 100.0                   # wired rate (Q5); bits per us == Mbps
-OVERHEAD_UNTAGGED_B = 66            # UDP 8 + IP 20 + MAC 14 + FCS 4 + preamble/SFD 8 + IFG 12
+L2_OVERHEAD_UNTAGGED_B = 46         # UDP 8 + IP 20 + Ethernet MAC 14 + FCS 4 (checked by PeriodicGate)
+PHY_PREAMBLE_IFG_B = 20             # 8 B PHY preamble/SFD + 12 B inter-frame gap (wire occupancy)
+OVERHEAD_UNTAGGED_B = L2_OVERHEAD_UNTAGGED_B + PHY_PREAMBLE_IFG_B  # 66 B total wire overhead untagged
 TAG_B = 4                           # 802.1Q C-tag
 TOL = 1e-9
 
-# Protocol characterization constants (Wagner et al., 2026; Ekrad et al., 2026; OMG DDS-RTPS v2.3)
-ETHERNET_MTU_PAYLOAD_B = 1400       # 1470 B on wire (117.6 us serialization at 100 Mbps)
-UDP_IPV4_MAX_UNFRAGMENTED_B = 1472  # 1500 B Ethernet MTU - 20 B IPv4 - 8 B UDP
-WAGNER_ORDER_BASE_B = 206           # Order(n_nodes, n_edges) = 206 + 154*n_nodes + 434*n_edges
+# Standard MTU and published benchmark constants (traffic_class_evidence_matrix.md)
+IP_MTU_B = 1500                     # Conventional Ethernet IPv4 MTU (1472 B UDP payload)
+UDP_IPV4_HEADER_B = 28              # 20 B IPv4 + 8 B UDP
+FULL_MTU_UDP_PAYLOAD_B = IP_MTU_B - UDP_IPV4_HEADER_B  # 1472 B
+WAGNER_ORDER_BASE_B = 206           # Wagner et al. (2026) Table I: 206 + 154*N_nodes + 434*N_edges
 WAGNER_ORDER_NODE_B = 154
 WAGNER_ORDER_EDGE_B = 434
-WAGNER_STATE_BASE_B = 522           # State(n_nodes, n_edges) = 522 + 75*n_nodes + 91*n_edges
+WAGNER_STATE_BASE_B = 522           # Wagner et al. (2026) Table I: 522 + 75*N_nodes + 91*N_edges
 WAGNER_STATE_NODE_B = 75
 WAGNER_STATE_EDGE_B = 91
-RTPS_HEADER_OVERHEAD_B = 20 + 12 + 24  # RTPS Header (20 B) + INFO_TS (12 B) + DATA submsg header (24 B) = 56 B
+PROFANTER_RTPS_UDP_OVERHEAD_B = 88  # Profanter et al. (2019) Table II: 188 B UDP payload for 100 B data
 
 # class -> (traffic class / gate index, expected window start us, expected width us)
 EXPECTED = {
@@ -136,28 +146,34 @@ def parse_payloads(text: str) -> Dict[str, int]:
 
 
 # --------------------------------------------------------------------------- arithmetic
-def frame_time_us(payload_b: int, tagged: bool) -> float:
-    """Return serialization time including frame overhead and optional C-tag."""
-    return (payload_b + OVERHEAD_UNTAGGED_B + (TAG_B if tagged else 0)) * 8 / LINK_MBPS
+def frame_time_us(payload_b: int, tagged: bool, include_phy_ifg: bool = True) -> float:
+    """Return serialization time in microseconds.
+
+    When ``include_phy_ifg=True`` (default), includes the 8 B preamble/SFD and 12 B IFG
+    (66 B untagged / 70 B tagged). When ``include_phy_ifg=False``, computes the L2
+    frame length seen by INET's PeriodicGate (46 B untagged / 50 B tagged).
+    """
+    base_ovh = OVERHEAD_UNTAGGED_B if include_phy_ifg else L2_OVERHEAD_UNTAGGED_B
+    return (payload_b + base_ovh + (TAG_B if tagged else 0)) * 8 / LINK_MBPS
 
 
-def frames_per_window(width_us: float, payload_b: int, tagged: bool) -> int:
+def frames_per_window(width_us: float, payload_b: int, tagged: bool, include_phy_ifg: bool = True) -> int:
     """Count complete frames that fit; fractional frames are excluded."""
-    return int(math.floor(width_us / frame_time_us(payload_b, tagged) + TOL))
+    return int(math.floor(width_us / frame_time_us(payload_b, tagged, include_phy_ifg) + TOL))
 
 
 def max_wire_bytes_for_window(width_us: float) -> int:
-    """Strict physical wire byte limit imposed by INET's implicit guard band (t_now + t_tx <= t_close)."""
+    """Largest wire occupancy (bytes) that can finish inside a window of ``width_us``."""
     return int(math.floor(width_us * LINK_MBPS / 8.0 + TOL))
 
 
 def wagner_order_bytes(n_nodes: int, n_edges: int) -> int:
-    """Empirical VDA 5050 Order JSON payload size in bytes (Wagner et al., IEEE WFCS 2026)."""
+    """Wagner et al. (2026) Table I Order size estimate: 206 + 154*N_nodes + 434*N_edges."""
     return WAGNER_ORDER_BASE_B + WAGNER_ORDER_NODE_B * n_nodes + WAGNER_ORDER_EDGE_B * n_edges
 
 
 def wagner_state_bytes(n_nodes: int, n_edges: int) -> int:
-    """Empirical VDA 5050 State JSON payload size in bytes (Wagner et al., IEEE WFCS 2026)."""
+    """Wagner et al. (2026) Table I State size estimate: 522 + 75*N_nodes + 91*N_edges."""
     return WAGNER_STATE_BASE_B + WAGNER_STATE_NODE_B * n_nodes + WAGNER_STATE_EDGE_B * n_edges
 
 
@@ -202,60 +218,85 @@ def run_checks(ini_text: str) -> Tuple[List[Check], List[str]]:
                             abs(sum(w for _, w in wins.values()) - cycle) < TOL,
                             f"sum = {sum(w for _, w in wins.values()):g} us"))
 
-    report.append(f"{'class':<10}{'TC':>3}{'payload':>8}{'window us':>16}{'max wire B':>12}"
-                  f"{'frame us (66/70 B ovh)':>25}{'frames/win':>12}{'latest start us':>17}")
+    report.append(f"{'class':<10}{'TC':>3}{'payload':>8}{'window us':>16}{'frame us (66/70 B ovh)':>25}"
+                  f"{'frames/win':>12}{'latest start us':>17}")
     ceilings = {}
     for cls, (tc, _, _) in EXPECTED.items():
         if cls not in wins:
             continue
         s, w = wins[cls]
         n_u, n_t = frames_per_window(w, payload[cls], False), frames_per_window(w, payload[cls], True)
-        max_wb = max_wire_bytes_for_window(w)
+        n_l2_u = frames_per_window(w, payload[cls], False, include_phy_ifg=False)
+        n_l2_t = frames_per_window(w, payload[cls], True, include_phy_ifg=False)
         ceilings[cls] = n_u
         checks.append(Check(f"{cls}: at least one frame fits the window", n_u >= 1 and n_t >= 1))
         checks.append(Check(f"{cls}: frames/window identical with and without C-tag", n_u == n_t,
                             f"untagged {n_u}, tagged {n_t}"))
+        if cls == "dds":
+            # Known divergence: report both counts instead of asserting equality.
+            checks.append(Check("dds: L2 (+46/50 B) vs wire (+66/70 B) accounting differ by exactly one frame "
+                                "(documented wire value 9 vs L2-only 10); in-sim confirmation = checklist C8",
+                                n_t == 9 and n_l2_t == 10 and n_u == 9 and n_l2_u == 10,
+                                f"wire={n_t}, L2={n_l2_t}"))
+        else:
+            checks.append(Check(f"{cls}: frames/window identical under L2 (+46/50 B) and wire (+66/70 B) accounting",
+                                n_u == n_l2_u and n_t == n_l2_t,
+                                f"wire={n_t}, L2={n_l2_t}"))
         t_t = frame_time_us(payload[cls], True)
-        report.append(f"{cls:<10}{tc:>3}{payload[cls]:>7}B{f'[{s:g}, {s + w:g})':>16}{max_wb:>11}B"
+        report.append(f"{cls:<10}{tc:>3}{payload[cls]:>7}B{f'[{s:g}, {s + w:g})':>16}"
                       f"{f'{frame_time_us(payload[cls], False):.2f} / {t_t:.2f}':>25}"
                       f"{n_t:>12}{s + w - t_t:>17.1f}")
 
-    # Protocol Characterization & TSN Guard-Band Validation Checks
+    # Evidence-Matrix Validation Checks (traffic_class_evidence_matrix.md)
     if len(wins) == len(EXPECTED):
+        mtu_l2_untagged_us = frame_time_us(FULL_MTU_UDP_PAYLOAD_B, False, include_phy_ifg=False)
+        mtu_wire_untagged_us = frame_time_us(FULL_MTU_UDP_PAYLOAD_B, False, include_phy_ifg=True)
+        mtu_wire_tagged_us = frame_time_us(FULL_MTU_UDP_PAYLOAD_B, True, include_phy_ifg=True)
+        checks.append(Check(
+            "Full 1500 B IP MTU serialization is 121.44 us (L2) and 123.04/123.36 us (wire), exceeding both 100 us and 120 us windows",
+            abs(mtu_l2_untagged_us - 121.44) < 1e-6
+            and abs(mtu_wire_untagged_us - 123.04) < 1e-6
+            and abs(mtu_wire_tagged_us - 123.36) < 1e-6
+            and frames_per_window(wins["orders"][1], FULL_MTU_UDP_PAYLOAD_B, False, include_phy_ifg=False) == 0,
+            f"L2={mtu_l2_untagged_us:.2f} us, wire={mtu_wire_untagged_us:.2f}/{mtu_wire_tagged_us:.2f} us > 100 us TC3 window"
+        ))
         tc3_max_wire_b = max_wire_bytes_for_window(wins["orders"][1])
         checks.append(Check(
-            "TSN Guard-Band (TC3): 100 us window enforces 1250 B max wire length on eth[1]",
-            tc3_max_wire_b == 1250,
-            f"max_wire={tc3_max_wire_b} B (1184 B untagged payload)"
-        ))
-        mtu_in_tc3 = frames_per_window(wins["orders"][1], ETHERNET_MTU_PAYLOAD_B, False)
+            "TSN guard band (TC3): 100 us window admits at most 1250 B of wire occupancy on eth[1]",
+            tc3_max_wire_b == 1250 and 600 + OVERHEAD_UNTAGGED_B <= tc3_max_wire_b,
+            f"max_wire={tc3_max_wire_b} B; configured Orders frame = {payload['orders'] + OVERHEAD_UNTAGGED_B} B"))
+        # Corrected simple-path (E = N - 1) VDA 5050 arithmetic from traffic_class_evidence_matrix.md
+        ord_4_3 = wagner_order_bytes(4, 3)
+        ord_20_19 = wagner_order_bytes(20, 19)
+        st_3_2 = wagner_state_bytes(3, 2)
+        st_3_3 = wagner_state_bytes(3, 3)
         checks.append(Check(
-            "VDA 5050 Horizon-Serialization Trap: MTU-fragmented full order (1470 B wire, 117.6 us) blocked by TC3 guard band",
-            mtu_in_tc3 == 0 and wagner_order_bytes(4, 4) > UDP_IPV4_MAX_UNFRAGMENTED_B,
-            f"Order(4,4)={wagner_order_bytes(4, 4)} B -> MTU fragment 117.6 us > 100 us (0 frames/win -> deadlock)"
-        ))
-        order_n1_lo, order_n1_hi = wagner_order_bytes(1, 0), wagner_order_bytes(1, 1)
-        checks.append(Check(
-            "VDA 5050 Orders (TC3): 600 B matches unit sliding-horizon dispatch n=1 [360, 794] B",
-            order_n1_lo <= payload["orders"] <= order_n1_hi,
-            f"configured={payload['orders']} B in [{order_n1_lo}, {order_n1_hi}] B"
-        ))
-        state_n3 = wagner_state_bytes(3, 3)
-        checks.append(Check(
-            "VDA 5050 State (TC1): 1000 B matches active local horizon n=3 (1020 B) within 2%",
-            abs(payload["state"] - state_n3) / state_n3 <= 0.02,
-            f"configured={payload['state']} B vs Wagner(3,3)={state_n3} B"
-        ))
-        dds_max_wait_us = (cycle or 1000.0) - wins["dds"][1] + frame_time_us(payload["dds"], True)
-        checks.append(Check(
-            "DDS-RTPS (TC2): 200 B payload accommodates 56 B RTPS headers and TAS gate wait <= 821.6 us << 5 ms",
-            payload["dds"] > RTPS_HEADER_OVERHEAD_B and abs(dds_max_wait_us - 821.6) < 1e-6,
-            f"CDR_body={payload['dds'] - RTPS_HEADER_OVERHEAD_B} B, max_gate_admission={dds_max_wait_us:.1f} us"
+            "VDA 5050 simple-path Order estimates (E=N-1) span 2124 B (4,3) to 11532 B (20,19) and exceed 1500 B IP MTU for N>=3",
+            ord_4_3 == 2124 and ord_20_19 == 11532 and wagner_order_bytes(3, 2) == 1536,
+            f"Order(3,2)=1536 B, Order(4,3)={ord_4_3} B, Order(20,19)={ord_20_19} B"
         ))
         checks.append(Check(
-            "OPC UA PubSub UADP (TC0): 1400 B WriterGroup NetworkMessage fits Ethernet MTU without IP fragmentation",
-            payload["telemetry"] <= UDP_IPV4_MAX_UNFRAGMENTED_B and ceilings["telemetry"] == 4,
-            f"payload={payload['telemetry']} B <= {UDP_IPV4_MAX_UNFRAGMENTED_B} B (4 frames/ms = 44.8 Mbps ceiling)"
+            "Configured 600 B Orders and 1000 B State lie inside Wagner et al. (2026) low-horizon ranges",
+            wagner_order_bytes(1, 0) <= payload["orders"] <= wagner_order_bytes(1, 1)
+            and st_3_2 <= payload["state"] <= wagner_state_bytes(4, 3),
+            f"Orders={payload['orders']} B in [360, 794] B; State={payload['state']} B in [{st_3_2}, {st_3_3}, 1095] B"
+        ))
+        checks.append(Check(
+            "Configured 200 B DDS surrogate accommodates Profanter et al. (2019) 88 B Fast-RTPS UDP payload overhead",
+            payload["dds"] > PROFANTER_RTPS_UDP_OVERHEAD_B,
+            f"200 B UDP payload = {payload['dds'] - PROFANTER_RTPS_UDP_OVERHEAD_B} B sample + {PROFANTER_RTPS_UDP_OVERHEAD_B} B Fast-RTPS overhead"
+        ))
+        # Item 6 & Item 7 checks: Wired FIFO drainage bound vs. D_c and common NER horizon lead time
+        fifo_max_drain_us = 80 * frame_time_us(payload["telemetry"], True, include_phy_ifg=True)
+        checks.append(Check(
+            "Item 6 (Deadline Violation Bound): 80-pkt FIFO max wired drain is 9408.0 us (> 5 ms DDS budget, < 10..100 ms budgets)",
+            abs(fifo_max_drain_us - 9408.0) < 1e-6 and 5000.0 < fifo_max_drain_us < 10000.0,
+            f"fifo_max_drain={fifo_max_drain_us / 1e3:.3f} ms (causes wired Late_Arrival only for D < 9.408 ms)"
+        ))
+        checks.append(Check(
+            "Item 6 (TDMA Operating Limit): 12 Mbps N=80 superframe (90 ms) satisfies 90 ms min State interarrival and D=100 ms but exceeds D=50 ms",
+            40 * 850.0 + 10 * 560.0 <= 42000.0 < 50000.0 and 80 * 850.0 + 39 * 560.0 == 89840.0 < 90000.0,
+            "N=40 occupied=39.60 ms <= 42 ms (<50 ms); N=80 occupied=89.84 ms <= 90 ms (>50 ms budget, <=100 ms)"
         ))
 
     if "telemetry" in wins:
@@ -299,3 +340,4 @@ def main(argv=None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+

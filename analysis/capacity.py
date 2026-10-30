@@ -1,9 +1,11 @@
-"""Back-of-envelope capacity and TSN protocol characterization model for the Matrix Factory Twin.
+#!/usr/bin/env python3
+"""Back-of-envelope capacity and evidence-backed protocol characterization model.
 
 Purpose: choose the P3 sweep levels (fleet size N, PHY rate, telemetry rate) so
-that both domains are driven from lightly loaded to saturated, and analytically
-validate the 4 industrial protocols (VDA 5050, DDS-RTPS, OPC UA PubSub UADP, and
-MQTT) against the IEEE 802.1Q / 802.1Qbv TSN switch and IEEE 802.11 MAC.
+that both domains are driven from lightly loaded to saturated, and provide an
+evidence-graded characterization of the four simulated traffic classes (Orders,
+State, DDS, Telemetry) and their underlying protocols (VDA 5050, DDS-RTPS,
+OPC UA, MQTT) aligned with traffic_class_evidence_matrix.md.
 
 Usage:  python3 analysis/capacity.py            # prints Markdown to stdout
         python3 analysis/capacity.py --out docs/capacity.md
@@ -40,6 +42,7 @@ TEL_WINDOW = 500e-6                 # TAS telemetry window
 GATE_CYCLE = 1e-3
 BUFFER_PKTS = 80
 
+D_SPECTRUM_MS = (1, 2, 5, 10, 20, 50, 100)   # decisions.md section 1.7
 PHY_RATES = (54e6, 24e6, 12e6, 6e6)
 FLEET = (5, 10, 20, 40, 80, 120, 200)
 TARGETS = (0.10, 0.30, 0.60, 0.90)
@@ -133,7 +136,7 @@ def main():
       "5-40 AMR range (18% at N=40, 37% at N=80). Including the 12 Mbps PHY factor and N=80 fleet "
       "level (Q5, Q8) drives wireless utilization to 95%, exposing CSMA contention.\n")
 
-    # 4. wired
+    # 4. wired (3 representative points + full 8-level P3 sweep at N=40 and N=80)
     w("## 4. Wired offered load on the switch-to-FMS port (100 Mbps)\n")
     dds_mbps = N_STATIONS * DDS_HZ * (DDS_B + WIRE_OVERHEAD_B) * 8 / 1e6
     w("| N (AMRs) | State (Mbps) | DDS (Mbps) | " + " | ".join(
@@ -146,6 +149,20 @@ def main():
             tel = N_STATIONS * (TEL_B + WIRE_OVERHEAD_B) * 8 / t / 1e6
             cells.append(f"{st + dds_mbps + tel:.1f}")
         w(f"| {n} | {st:.1f} | {dds_mbps:.2f} | " + " | ".join(cells) + " |")
+
+    w("\n### 4.1 Full 8-level telemetry sweep offered load on `tsnSwitch -> fms` (`eth[0]`)\n")
+    w("| Tel interval (us) | Offered payload (Mbps) | Offered wire load, 4 stns (Mbps) | Total `eth[0]` wire load at N=10 (Mbps) | Total `eth[0]` wire load at N=40 (Mbps) | Total `eth[0]` wire load at N=80 (Mbps) |")
+    w("|---|---|---|---|---|---|")
+    st_10 = 10 * STATE_HZ * (STATE_B + WIRE_OVERHEAD_B) * 8 / 1e6
+    st_40 = 40 * STATE_HZ * (STATE_B + WIRE_OVERHEAD_B) * 8 / 1e6
+    st_80 = 80 * STATE_HZ * (STATE_B + WIRE_OVERHEAD_B) * 8 / 1e6
+    for tus in TEL_SWEEP_INTERVALS_US:
+        t_sec = tus * 1e-6
+        tel_pay = N_STATIONS * TEL_B * 8 / t_sec / 1e6
+        tel_wire = N_STATIONS * (TEL_B + WIRE_OVERHEAD_B) * 8 / t_sec / 1e6
+        w(f"| {tus} | {tel_pay:.1f} | {tel_wire:.2f} | {st_10 + dds_mbps + tel_wire:.2f} | "
+          f"{st_40 + dds_mbps + tel_wire:.2f} | {st_80 + dds_mbps + tel_wire:.2f} |")
+
     ft = wire_frame_time(TEL_B)
     frames = int(TEL_WINDOW // ft)
     cap = frames * TEL_B * 8 / GATE_CYCLE / 1e6
@@ -158,33 +175,82 @@ def main():
       f"{int(100e-6 // wire_frame_time(ORDER_B, WIRE_OVERHEAD_UNTAGGED_B))} frame per 1 ms cycle "
       f"({1/GATE_CYCLE:.0f} orders/s), so check it against N x {ORDER_HZ:g} orders/s.\n")
 
-    # 5. 4-Protocol Characterization Matrix
-    w("## 5. Four-Protocol Stack Characterization (VDA 5050, DDS-RTPS, OPC UA UADP, MQTT)\n")
-    w("| Protocol & Normative Profile | Simulated Class (Port / PCP / TC) | L7/L4 Encapsulation & Sizing Formula | IEC/IEEE 60802 Class | TSN & Hybrid Validation Constraint |")
-    w("|---|---|---|---|---|")
-    w("| **VDA 5050 v3.0.0** (`order` + `instantActions`) | `Orders` (`5051` / PCP 6 / TC3) | UTF-8 JSON: `206 + 154*n_nodes + 434*n_edges` B. Unit sliding horizon `n=1` -> `360..794` B (`600 B` locked). C-tag stripped toward AP (`666 B` wire). | `ALEV_TT` (Control Events, aperiodic) | Full orders (`n in [4,20]`, `2.56..11.97 KB`) fragment to `1470 B` (`117.6 us`), violating `TC3` `100 us` (`1250 B`) guard band (deadlock on `eth[1]`). |")
-    w("| **VDA 5050 v3.0.0** (`state` + `visualization`) | `State` (`5050` / PCP 2 / TC1) | UTF-8 JSON: `522 + 75*n_nodes + 91*n_edges` B. Active local horizon `n=3` -> `1020 B` (`1000 B` locked, `1070 B` wire). | `CASYN_TT` (Cyclic-Async, 10 Hz, ZOH) | Hits `eth[0]` at 5 phases (54 Mbps, `gcd(400,1000)=200 us`) or 20 phases (12 Mbps, `gcd(850,1000)=50 us`). Max `ScheduledDcf` cycle at `N=80, 12 Mbps` is `90 ms`. |")
-    w("| **OMG DDS v1.4 / DDSI-RTPS v2.3** | `DDS` (`5100` / PCP 4 / TC2) | Native UDP: `20 B` RTPS hdr + `12 B` `INFO_TS` + `24 B` `DATA` + `144 B` CDR = `200 B` (`270 B` wire). | `CASYN_TT` (100 Hz +/- 5% jitter, Watchdog KILL) | Shares `eth[0]` with `State` and `Telemetry` (`TC3` is empty on `eth[0]`, so `DDS` is highest active priority). `200 us` window fits 9 frames/ms (`19.44 Mbps` vs `0.864 Mbps`). |")
-    w("| **OPC UA Part 14 PubSub (UADP)** | `Telemetry` (`5200` / PCP 0 / TC0) | Broker-less binary UADP over UDP: `WriterGroup` bundles multiple `DataSetMessages` (`Key Frame`) into `1400 B` `NetworkMessage` (`1470 B` wire). | `CFDI_TT` + Best Effort (ZOH secondary) | Fits Ethernet MTU without IP fragmentation. Throttled by TAS `[500, 1000) us` guard band to 4 frames/ms (`44.8 Mbps` payload ceiling) to protect `TC1..TC3`. |")
-    w("| **OASIS MQTT v5.0** (Co-located Broker Surrogate) | Transport layer for VDA 5050 & IIoT diagnostics | Native MQTT/TCP/IPv6 adds `42 B` VDA hdr + `2 B` MQTT + `20 B` TCP + `40 B` IPv6. Modeled via open-loop UDP to co-located FMS broker. | Transport abstraction (Stream 1 parity) | Co-locating broker on FMS eliminates 2nd switch hop. Open-loop UDP prevents TCP `cwnd` throttling after FIFO drops and avoids reverse TCP ACKs consuming DCF/TDMA slots. |\n")
+    # 5. Evidence-Graded Traffic Class & Protocol Characterization
+    w("## 5. Evidence-Graded Traffic Class and Protocol Characterization\n")
+    w("Evidence labels follow `traffic_class_evidence_matrix.md`: **Paper** (published work), "
+      "**Derive** (serialization/arithmetic check), **Choice** (experimental modeling decision), "
+      "**Standard** (normative specification), **Verify** (code/runtime audit).\n")
+    w("| Simulated Class | 1. Role & Endpoints | 2. Schema & Size Basis | 3. Generation Process | 4. Transport & Framing | 5. Deadline & Consumption |")
+    w("|---|---|---|---|---|---|")
+    w("| **Orders** (`TC3`, Port `5051`, PCP `6`) | Downlink AMR dispatch (`fms -> amr[i]`). Startup uplink `Connection` (`144 B`) / `Factsheet` (`1551 B`), `instantActions` (`293 B`), and 20 Hz teleop (`14 B`) are omitted (**Choice + Paper**: Wagner 2026 Tables I-II). | **Choice (`600 B`)** checked via **Paper + Derive** (Wagner 2026 Table I `206+154*N+434*E`, incl. `84 B` VDA hdr: `(1,0)=360 B`, `(1,1)=794 B`; simple paths `E=N-1` for `N=4..20` span `2124..11532 B`). | **Choice:** `exponential(200ms)` (`5 Hz` per AMR) modeling aperiodic partial-order updates (**Paper**: Wagner 2026 pp. 3, 5). | Native VDA 5050 uses MQTT/TCP (`+42 B` MQTT hdr/topic in Wagner Fig. 6, **Paper + Standard**). Modeled as open-loop UDP to direct FMS endpoint; C-tag stripped on `eth[1]` (`666 B` wire / `646 B` L2, **Verify**). | **Choice + Paper + Verify:** `D_c = 50 ms` (Wagner p. 4 notes `~50 ms` order delay triggers AMR braking), `Watchdog KILL` beyond `TTL = 50 ms`. |")
+    w("| **State** (`TC1`, Port `5050`, PCP `2`) | Uplink AMR status (`amr[i] -> fms`) (**Paper + Standard**: VDA 5050 v3.0.0, Wagner 2026). | **Choice (`1000 B`)** checked via **Paper + Derive** (Wagner 2026 Table I `522+75*N+91*E`: `(3,2)=929 B`, `(3,3)=1020 B`, `(4,3)=1095 B`). | **Choice:** `uniform(90ms, 110ms)` (`10 Hz` nominal; note Wagner Table I lists 10 Hz `State`, whereas p. 3 prose & Table III set `100 ms` `Visualization` and event-driven `State`, **Paper + Choice**). | Native MQTT/TCP abstracted to open-loop UDP (`1070 B` tagged wire / `1050 B` L2 on `eth[0]`, **Choice + Verify**). | **Choice + Verify:** `D_c = 50 ms`, `Zero-Order Hold (ZOH)` with discrete tick staleness (`stalenessTicksHist`). |")
+    w("| **DDS** (`TC2`, Port `5100`, PCP `4`) | Station-to-FMS periodic variable reporting (`station[i] -> fms`, Option 7B) adapted from the 4-station cell (`Set`/`End` `PV` topics) of Calvo 2013 (**Paper + Choice**). | **Choice (`200 B` UDP payload)** checked via **Paper + Derive** (Profanter 2019 Table II Fast-RTPS v1.6.0 benchmark: `+88 B` UDP payload overhead for `0..10000 B` -> `~112 B` sample + `88 B` RTPS). | **Choice:** `uniform(9.5ms, 10.5ms)` (`100 Hz` +/- 5% jitter to prevent 10 ms tick resonance; Calvo 2013 p. 3 lists 10/50/100 ms periods with ~10% admissible jitter, **Paper + Choice**). | Native UDP/IP unicast (`270 B` tagged wire / `250 B` L2 on `eth[0]`). Approximates `Best effort` + `Keep last (1)` periodic variables in Calvo Table 2 (**Paper + Standard + Choice**). | **Choice + Verify:** `D_c = 5 ms` transport/NER budget (`Watchdog KILL`). Distinct from DDS `DEADLINE` update-separation QoS (**Standard**). |")
+    w("| **Telemetry** (`TC0`, Port `5200`, PCP `0`) | Station background reporting (`station[i] -> fms`). Contextualized by Brenner 2024 (14-day benign OT mix: Modbus/TCP `43.92-48.95%`, MQTT `11.59-31.07%`, OPC UA `0.87-1.80%` on attack days) and Maia 2020 (6-module OPC UA TCP C/S, `55-72 pkts/s`, `1-10 s` elastic response) (**Paper + Choice**). | **Choice (`1400 B` UDP payload)** selected as an unfragmented MTU-conscious stress payload (`1470 B` tagged wire / `1450 B` L2; full 1500 B IP MTU is `1538/1542 B` wire, **Derive**). | **Choice:** 8-level Poisson sweep (`2000..300 us` -> `22.4..149.3 Mbps` payload) to bracket the 44.8 Mbps TAS ceiling and 95 Mbps FIFO knee (**Choice + Verify**). | Open-loop UDP mapped to `PCP 0 / TC0` (**Choice + Verify**). Avoids TCP congestion backpressure and delayed ACKs (RFC 9293); under OASIS MQTT v5.0 §4.4, QoS>0 resend occurs only on session reconnect (**Standard**). | **Choice + Verify:** `D_c = 100 ms` secondary ZOH panel; excluded from primary control miss metric. |\n")
 
-    # 6. TSN Validation: Worst-Case Delay Bounds (FIFO vs Strict Priority vs TAS)
+    # 6. TSN Validation Bounds (Multi-Component Queueing, Guard-Band Fit, and ScheduledDcf Contiguous Slots)
     t_tel_us = wire_frame_time(TEL_B) * 1e6
     t_state_us = wire_frame_time(STATE_B) * 1e6
     t_dds_us = wire_frame_time(DDS_B) * 1e6
     t_ord_us = wire_frame_time(ORDER_B, WIRE_OVERHEAD_UNTAGGED_B) * 1e6
     fifo_max_ms = BUFFER_PKTS * t_tel_us / 1e3
-    tas_dds_wait_us = (1000.0 - 200.0) + t_dds_us
-    tas_state_wait_us = (1000.0 - 200.0) + t_state_us
-    tas_ord_wait_us = (1000.0 - 100.0) + t_ord_us
 
-    w("## 6. TSN Switch Validation: Single-Packet Serialization, Strict Priority Blocking, and TAS Gate Wait\n")
-    w("| Traffic Class (Port) | Wire Serialization `t_tx` (us) | FIFO Saturation Max Queue Delay (`80 pkts`) | 802.1Q Strict Priority Non-Preemptive Blocking (`Wired_Prio`) | 802.1Qbv TAS Single-Arrival Max Gate Wait + `t_tx` (`Wired_TAS`) |")
-    w("|---|---|---|---|---|")
-    w(f"| `Orders` (`TC3`, `eth[1]`) | {t_ord_us:.1f} us (`666 B` untagged) | Dedicated downlink port (no telemetry) | 0.0 us (`TC0..TC2` empty on `eth[1]`) | {tas_ord_wait_us + t_ord_us:.1f} us (`900.0 us` closed + `{t_ord_us:.1f} us` guard margin + `{t_ord_us:.1f} us` tx) |")
-    w(f"| `DDS` (`TC2`, `eth[0]`) | {t_dds_us:.1f} us (`270 B` tagged) | {fifo_max_ms:.3f} ms (> `5 ms` deadline -> misses + drops) | {t_tel_us:.1f} us (1 residual `Telemetry` frame; `TC3` empty on `eth[0]`) | {tas_dds_wait_us + t_dds_us:.1f} us (`{tas_dds_wait_us:.1f} us` max wait after `278.4 us` cutoff + `{t_dds_us:.1f} us` tx) |")
-    w(f"| `State` (`TC1`, `eth[0]`) | {t_state_us:.1f} us (`1070 B` tagged) | {fifo_max_ms:.3f} ms (buffer overflow drops above `95 Mbps`) | {t_tel_us:.1f} us lower-priority block + `DDS` burst (`4 * 21.6 = 86.4 us`) | {tas_state_wait_us + t_state_us:.1f} us (`{tas_state_wait_us:.1f} us` max wait after `414.4 us` cutoff + `{t_state_us:.1f} us` tx) |")
-    w(f"| `Telemetry` (`TC0`, `eth[0]`) | {t_tel_us:.1f} us (`1470 B` tagged) | {fifo_max_ms:.3f} ms | Preempted between frames by `TC1` and `TC2` | Throttled to 4 frames/cycle (`44.8 Mbps` payload ceiling) |\n")
+    w("## 6. Hybrid TSN Validation: Multi-Component Queueing Bounds and Slot Constraints\n")
+    w("- **Guard-Band and Full-MTU Serialization (`Verify + Derive`):** INET 4.7.0 `PeriodicGate` checks L2 frame length (`payload + 46 B` untagged / `+ 50 B` tagged), while physical 100 Mbps wire occupancy adds `8 B` preamble and `12 B` IFG (`+ 66 B / + 70 B`). Orders, State and Telemetry fit `1, 2, 4` frames per window under both definitions; `DDS` fits `9` frames on the wire (`270 B` = `21.6 us`) but would fit `10` under L2-only accounting (`250 B` = `20.0 us`), so the documented `9` rests on the wire convention until the in-simulation gate trace (checklist C8) confirms which one INET 4.7.0 applies (`Verify`). Conversely, a full `1500 B` IP MTU packet (`1518/1522 B` L2 = `121.44/121.76 us`; `1538/1542 B` wire = `123.04/123.36 us`) exceeds both the `100 us` `TC3` window and a `120 us` window.\n")
+    w(f"- **Strict Priority (`Wired_Prio`) vs. TAS (`Wired_TAS`) Delay Components on `eth[0]` (`Derive + Verify`):** Under `Wired_Prio`, one lower-priority `Telemetry` frame contributes at most `{t_tel_us:.1f} us` of non-preemptive blocking (`116.0 us` L2), but total delay also includes same-class burst backlog (up to `3 * {t_dds_us:.1f} = {3*t_dds_us:.1f} us` for 4 concurrent `DDS` stations, or queued `State` bursts) plus higher-priority `DDS` interference on `State` (`4 * {t_dds_us:.1f} = {4*t_dds_us:.1f} us`). Under `Wired_TAS`, `Telemetry` is capped at `44.8 Mbps` (`4` frames/ms), protecting critical queues (consistent with Seijo et al., 2022 Table IV, where wired 802.1Qbv reduces RT missed-deadline probability from `54-87%` to `0%` under BE overload). However, for an isolated asynchronous `DDS` or `State` arrival right after its in-window guard-band cutoff (`278.4 us` or `414.4 us` wire), the frame waits the remaining guard margin (`21.6 us` or `85.6 us`) plus the `800.0 us` gate-closed interval = `821.6 us` or `885.6 us` before the next gate opens (`{821.6 + t_dds_us:.1f} us` or `{885.6 + t_state_us:.1f} us` including serialization), and multi-packet bursts (>2 `State` frames/ms) queue across subsequent cycles, versus up to `{fifo_max_ms:.3f} ms` under saturated `Wired_FIFO`.\n")
+    w(f"- **Wireless-to-Wired Phase Lattice and Contiguous AP Slots (`Paper + Verify`):** Corresponding to Seijo et al. (2022) Section III-B (proving cross-domain queue wait `d_q,w in [0, T_s]` when schedules are unaligned or multi-flow), with `s_AMR = 400 us` (54 Mbps) and `850 us` (12 Mbps), the ideal slot-start lattice modulo the `1000 us` GCL has at most `min(N, 5)` and `min(N, 20)` residue classes (`gcd(400,1000)=200 us`, `gcd(850,1000)=50 us`). In `ScheduledDcf.cc`, contiguous AP downlink slots merge into one block (`numAssignedSlots = 1, 1, 3, 10, 39` at 12 Mbps), so the single-slot `560 us` (`requiredExchangeTime = 550 us`) bound restricts individual downlink exchanges at `N in {{5, 10}}` and at the trailing edge of the merged AP block for `N >= 20`.\n")
+
+    # Item 6: Explicit Schedule Operating Limits & Deadline Violation Regimes
+    w("- **Item 6 — Schedule Operating Limits and Deadline Violations (`Verify + Derive`):** "
+      "Observed deadline misses must be attributed to explicit operating boundaries of the configured "
+      "schedule and buffer capacities rather than universal protocol limitations:\n"
+      "  1. *Wired FIFO Queuing Ceiling vs. `D_c`:* On `eth[0]`, an 80-packet FIFO buffer filled with "
+      f"`1470 B` frames bounds queueing delay to `{fifo_max_ms:.3f} ms`. Thus, for `State` (`D_c = 50 ms`), "
+      "wired-only delay never causes late arrivals (`Late_Arrival = 0` for `D >= 10 ms`; misses above `95 Mbps` "
+      "arise strictly from `Drop_Queue`), whereas for `DDS` (`D_c = 5 ms`), saturated FIFO queueing between "
+      f"`5.0 ms` and `{fifo_max_ms:.3f} ms` induces both `Late_Arrival` misses and `Drop_Queue` losses.\n"
+      "  2. *Scheduled TDMA Superframe Operating Boundary (`T_super` vs. `D_c`):* Under `ScheduledDcf`, each AMR "
+      "receives one uplink slot per superframe `T_super`. Whenever `T_super > D_c`, an asynchronous `State` "
+      "packet generated after its slot waits up to `T_super`, violating `D_c` even with zero collisions (`Drop_Retry = 0`). "
+      "Specifically, at `N = 80, 12 Mbps` (`T_super = 90 ms`, max observed delay `90.876 ms`), the schedule guarantees "
+      "stability (`T_super <= 90 ms` minimum State interarrival) and `0%` misses at `D = 100 ms`, but exceeds the "
+      "`50 ms` nominal budget; if generation phase is uniform over the superframe and wait is uniform on `[0, T_super)`, the implied miss fraction is about `(90 - 50) / 90 = 44.4%` (Definition A) "
+      "and `(90 - 55) / 90 = 38.9%` (Definition B, `T = 10 ms`, mean tick slack 5 ms) (`Derive`, not measured; `Verify` against the exported quantiles). This is an explicit operating boundary of the single-slot-per-AMR `12 Mbps` schedule, "
+      "not a general impossibility result for static TDMA or wireless TSN.\n")
+
+    w("**Operating-limit and deadline-violation matrix (`Derive + Verify`).** Worst-case `State` uplink access wait under `ScheduledDcf` is bounded by "
+      "`T_super` (one slot per AMR per superframe). `ok` = `T_super <= D`; otherwise the cell shows the implied miss fraction "
+      "`(T_super - D) / T_super` under a uniform-phase assumption (an estimate, not a measurement). `T_super` and AP slot counts are the locked "
+      "`omnetpp.ini` values.\n")
+    super_54 = {5: 3, 10: 5, 20: 9, 40: 20, 80: 48}
+    super_12 = {5: 6, 10: 10, 20: 20, 40: 42, 80: 90}
+    ap_slots_54 = {5: 1, 10: 1, 20: 2, 40: 8, 80: 39}
+    ap_slots_12 = {5: 1, 10: 1, 20: 3, 40: 10, 80: 39}
+    w("| PHY | `N` | `T_super` (ms) | AP slots `K` (contiguous block, ms) | " + " | ".join(f"D={d} ms" for d in D_SPECTRUM_MS) + " |")
+    w("|---|---|---|---|" + "---|" * len(D_SPECTRUM_MS))
+    for label, sup, apk, slot_us in (("54 Mbps", super_54, ap_slots_54, 400), ("12 Mbps", super_12, ap_slots_12, 560)):
+        for n in (5, 10, 20, 40, 80):
+            ts = sup[n]
+            cells = []
+            for d in D_SPECTRUM_MS:
+                cells.append("ok" if ts <= d else f"{100 * (ts - d) / ts:.0f}% miss")
+            w(f"| {label} | {n} | {ts} | {apk[n]} ({apk[n] * slot_us / 1000:.2f}) | " + " | ".join(cells) + " |")
+    w("")
+    w("Wired side (`Wired_FIFO`, `eth[0]`, 80-packet buffer): `Late_Arrival` is possible only for `D < "
+      f"{fifo_max_ms:.3f} ms`, i.e. `D in {{1, 2, 5}} ms`; for `D >= 10 ms` a wired miss can only be `Drop_Queue` (`rho > 1`).\n")
+    w("`N = 80, 12 Mbps` (`T_super = 90 ms`, `89.84 ms` occupied) is the operating limit of this schedule/PHY pair relative to a `50 ms` budget: "
+      "it is the only configuration where `T_super > 50 ms`, and it still meets `D = 100 ms`. It is not a statement about static TDMA in general.\n")
+
+    # Item 7: Application Consumption & Digital Twin NER Contract Attribution
+    w("- **Item 7 — Application Consumption and Twin NER Contract (`Choice + Verify`):** "
+      "Generic protocol specifications (VDA 5050, OMG DDS, OPC UA, OASIS MQTT) do not define the digital twin's "
+      "discrete-event ingestion semantics. The consumption ceiling `c(g, L_c, T, phi_T) = phi_T + ceil((g - phi_T + L_c) / T) * T`, "
+      "the replication-global phase draws `phi_T ~ U(0, T)` on `rng-1` for `T in {10, 50, 500} ms`, the non-strict "
+      "on-time inequality `a <= c`, the class-specific late-arrival policies (`Watchdog KILL` at `a > g + TTL_c` with "
+      "experimental surrogates `TTL_orders = 50 ms` and `TTL_dds = 5 ms` vs. `Zero-Order Hold` with discrete tick "
+      "staleness `Delta_k_stale` for `State` and `Telemetry`), and the offline piecewise-linear quantile integral (Eq. 10) "
+      "are defined strictly by the Matrix Factory Twin's Java runtime contract (`MainSimulator.java`, `AMRArtifact.java`, "
+      "`BaseStationArtifact.java`, `TimerArtifact.java`) and enforced in `ExperimentCoordinator.cc`, `DeadlineSink.cc`, "
+      "and `analysis/deadline_metrics.py`.\n")
 
     text = "\n".join(out)
     if args.out:
@@ -196,3 +262,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
