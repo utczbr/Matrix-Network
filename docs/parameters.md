@@ -154,17 +154,17 @@ Based on the analytic capacity model ([analysis/capacity.py](../analysis/capacit
 | **Active AMR step** | $50$ to $500$ ms (`soonestNeed = min(0.5, max(dwellRemaining, 0.05))`) | Confirmed (maintainer) | `AMRArtifact.java:495, 499`. $0.05$ s is the minimum active kinematic step. |
 | **Quorum timeout (`TICK_QUORUM_TIMEOUT_MS`)** | $10$ ms, **wall-clock** | Confirmed (maintainer) | Thread barrier for the 13 JaCaMo agents, not simulated time; not a model parameter. |
 | **Tick period used for Definition B** | Primary $T = 10$ ms; offline sensitivity $T \in \{50, 500\}$ ms | Decision | Evaluated from `lookup_ecdf` without re-running OMNeT++. |
-| **Consumption instant** | $c = \lceil (g + L_c)/T \rceil \cdot T$ | Confirmed (maintainer) | `MainSimulator.java:422-428`. |
+| **Consumption instant** | $c = \phi_T + \lceil (g - \phi_T + L_c)/T \rceil \cdot T$ | Confirmed (maintainer) | `MainSimulator.java:422-428`. |
 | **Boundary condition** | On time iff $a \le c$ (non-strict) | Confirmed (maintainer) | `issueTimeAdvanceGrant`: `time >= requestedNextTime`. |
 | **Clock stall on late arrival** | Never | Confirmed (maintainer) | `MainSimulator.java:255-258`. |
-| **Late arrival: State, Telemetry** | Zero-Order Hold; late update consumed at $c' = \lceil a/T \rceil \cdot T$ | Confirmed (maintainer) | `assembleTelemetryFrame()` (`MainSimulator.java:301-420`). |
+| **Late arrival: State, Telemetry** | Zero-Order Hold; late update consumed at $c' = \phi_T + \lceil (a - \phi_T)/T \rceil \cdot T$ | Confirmed (maintainer) | `assembleTelemetryFrame()` (`MainSimulator.java:301-420`). |
 | **Late arrival: Orders, DDS** | Consumed at first tick $\ge a$ while $a \le g + \text{TTL}$; discarded (KILL) beyond TTL | Confirmed (maintainer) | `TimerArtifact.evaluateTTLs()`, `cancelTransport`, `recordWatchdogFired`. |
 | **Lead time $L_c$** | Working choice $L_c = D_c$ for all classes. Maintainer variant for State/Telemetry: $L_c = T$ (computed offline) | **Open** | decisions.md §1.3.2. Ask maintainers which reading the twin implements for State. |
 | **Tier 1: network budget $D^{\text{net}}_c$** | Orders $50$ ms; State $50$ ms; DDS $5$ ms; Telemetry $100$ ms | Decision (experimental parameters) | 3GPP TS 22.104 and 5G-ACIA ranges: AGV guidance $10$ to $50$ ms; interlocking $1$ to $5$ ms; monitoring $10$ to $100$ ms. |
 | **Tier 1 sensitivity markers** | State and Orders at $10$ ms and $20$ ms | Decision | Tighter operational baseline (checklist A3). |
 | **Deadline spectrum $D$** | $\{1, 2, 5, 10, 20, 50, 100\}$ ms | Decision | Continuous Miss-vs-$D$ curves for Definitions A and B (decisions.md §1.7). |
 | **Experiment watchdog TTL** | Orders 50 ms; DDS 5 ms | **Decision** | Explicit surrogate used by `omnetpp.ini`, equal to each nominal deadline. The production twin's protocol-specific constants remain external and are not claimed here. |
-| **Staleness measure** | $\Delta k_{\text{stale}} = \max(0, \lceil a/T \rceil - \lceil (g + L_c)/T \rceil)$ for delivered State/Telemetry | Decision | `DeadlineSink` histogram and offline eCDF evaluation. |
+| **Staleness measure** | $\Delta k_{\text{stale}} = \max\big(0, \lceil (a - \phi_T)/T \rceil - \lceil (g - \phi_T + L_c)/T \rceil\big)$ for delivered State/Telemetry | Decision | `DeadlineSink` histogram and offline eCDF evaluation. |
 
 ### 6.2 Transport Fidelity (Q4, Oct 14, 2026)
 
@@ -175,6 +175,15 @@ Based on the analytic capacity model ([analysis/capacity.py](../analysis/capacit
 | **L4 header difference** | UDP $8$ B vs. TCP $20$ B ($32$ B with timestamps): $12$ to $24$ B per packet | Verified (analytic) | $0.96$ to $1.92$ $\mu$s at $100$ Mbps; $1.1$ to $2.2\,\%$ of a State frame, $0.8$ to $1.6\,\%$ of a Telemetry frame. |
 | **Payload size definition** | Application payload **includes** the L7 protocol header (MQTT/RTPS/UADP) | Verified | Sizes locked to VDA 5050 standard (State: 1000 B, Orders: 600 B) per Q6. |
 | **Broker** | None. The FMS is the endpoint (AMR $\to$ AP $\to$ tsnSwitch $\to$ FMS). | Decision | Avoids a second switch traversal and broker-queue effects. |
+
+### 6.3 Four-Protocol Characterization & TSN Validation Summary
+
+| Protocol | Mapped Flow (`omnetpp.ini`) | IEC/IEEE 60802 / IIC Class | Header & Payload Structure | TSN & Hybrid Validation Invariant |
+| :--- | :--- | :---: | :--- | :--- |
+| **VDA 5050 v3.0.0** | `Orders` (`TC 3`, Port `5051`) & `State` (`TC 1`, Port `5050`) | `ALEV_TT` (`Orders`) & `CASYN_TT` (`State`) | JSON over co-located broker surrogate: `State(3,3) = 1020 B` (`1000 B` locked); `Order(1,0..1) = 360..794 B` (`600 B` locked). C-tag (`4 B`) stripped on `eth[1]` toward AP. | Constraining `Orders` to $n=1$ prevents MTU fragmentation ($1470\ \text{B} = 117.6\ \mu\text{s}$), which would violate the $1250\ \text{B}$ ($100\ \mu\text{s}$) `TC 3` implicit guard band on `eth[1]` and the $550\ \mu\text{s}$ AP TDMA slot threshold at $12\ \text{Mbps}$. |
+| **OMG DDS / DDSI-RTPS v2.3** | `DDS` (`TC 2`, Port `5100`, Option 7B) | `CASYN_TT` (Cyclic-Asynchronous) | Native UDP unicast (`station[i] -> fms`): `20 B` RTPS header + `12 B` `INFO_TS` + `24 B` `DATA` submessage + `144 B` CDR interlocking state = `200 B` (`270 B` wire). | Because `TC 3` is empty on `eth[0]`, `DDS` is the highest active priority on the congested uplink. Under `Wired_Prio`, max lower-priority blocking is $117.6\ \mu\text{s}$; under `Wired_TAS`, the $[100, 300)\ \mu\text{s}$ window fits $9$ frames/ms ($19.44\ \text{Mbps}$ vs. $0.864\ \text{Mbps}$ offered), bounding gate wait to $\le 821.6\ \mu\text{s} \ll D_{\text{dds}} = 5\ \text{ms}$. |
+| **OPC UA Part 14 PubSub (UADP)** | `Telemetry` (`TC 0`, Port `5200`) | `CFDI_TT` + Best Effort | Broker-less binary UADP over UDP: station `WriterGroup` aggregates periodic `DataSetMessages` (`CyclicDataset=True`, `Key Frame`) into one `1400 B` `NetworkMessage` (`1470 B` wire) with `PCP = 0`. | Maximizes Ethernet frame efficiency without IP fragmentation ($\le 1472\ \text{B}$). In `Wired_TAS`, the $[500, 1000)\ \mu\text{s}$ window caps admission at $\lfloor 500 / 117.6 \rfloor = 4$ frames/ms ($44.8\ \text{Mbps}$ payload ceiling), isolating `TC 1..3` from background overload up to $149.3\ \text{Mbps}$. |
+| **OASIS MQTT v5.0** | Transport surrogate for VDA 5050 & IIoT logs | Open-loop UDP surrogate (`rng-1` parity) | Full stack overhead is `42 B` VDA JSON hdr + `2 B` MQTT + `20 B` TCP + `40 B` IPv6. Abstracted to open-loop UDP with broker co-located on FMS. | Co-located FMS broker removes a 2nd switch traversal. Open-loop UDP prevents TCP `cwnd` throttling after FIFO drops, eliminates HoL blocking on ZOH `State` flows, and prevents reverse-path TCP `ACK` / `PUBACK` frames from doubling DCF contention or consuming `ScheduledDcf` slots. |
 
 ---
 

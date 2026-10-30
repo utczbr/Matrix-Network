@@ -3,15 +3,16 @@
 Implements only what is closed in docs/decisions.md (Oct 14, 2026):
 
 * Definition A (relative deadline, section 1.2) and Definition B (tick-grid
-  consumption instant, sections 1.3 / 1.3.1: c = ceil((g + L) / T) * T, on time
-  iff a <= c, non-strict). Working lead time L = D; the maintainers' variant
+  consumption instant, sections 1.3 / 1.3.1: c = phi + ceil((g + L - phi) / T) * T,
+  on time iff a <= c, non-strict). Working lead time L = D; the maintainers' variant
   L = T for State/Telemetry is obtained by passing ``lead_ms=tick_ms``.
 * Per-replication tick-grid phase phi (section 1.8): c = phi + ceil((g + L - phi) / T) * T.
 * Accounting filters (section 1.5): discard g < warm-up, discard c > sim-time-limit,
   mutually exclusive bins On_Time / Late_Arrival / Late_Termination / Drop_Queue / Drop_Retry / Drop_Other.
 * Staleness in ticks for delivered State/Telemetry packets (section 1.1).
 * Offline evaluation of Miss_A / Miss_B from the stored delay quantile table, so
-  other T, other L and other D need no re-run (section 1.3.1).
+  other T, other L, other D, and additive hardware/channel residual shifts (shift_ms
+  for Soft-W-TSN COTS Residual Service Time or Wi-STARK tau_ina) need no re-run.
 * Student-t confidence interval over replications and Wilson upper bounds for
   boundary proportions (section 1.6).
 
@@ -123,16 +124,7 @@ def outcome_counts(g, a, cause, d_ms: float, *, definition: str = "B",
                    lead_ms: Optional[float] = None, horizon_lead_ms: Optional[float] = None,
                    tick_ms: float = T_PRIMARY_MS, phase_ms: float = 0.0,
                    warmup_s: float = WARMUP_S, sim_limit_s: float = SIM_LIMIT_S) -> Dict[str, int]:
-    """Mutually exclusive, exhaustive bins over the valid packets.
-
-    ``cause`` holds "" for packets without a recorded drop, otherwise one of
-    "queue", "retry", "other". A packet with a = NaN and no drop cause was still
-    in flight at termination and is counted as Late_Termination (section 1.5 item 3).
-
-    ``horizon_lead_ms`` is the lead time used by the horizon filter (c <= sim-time-limit);
-    it defaults to the lead time of the miss test. Passing the largest lead of a family
-    of evaluations (e.g. 100 ms for the D spectrum) puts all of them on one packet set.
-    """
+    """Mutually exclusive, exhaustive bins over the valid packets."""
     if definition not in ("A", "B"):
         raise ValueError("definition must be 'A' or 'B'")
     lead = d_ms if lead_ms is None else lead_ms
@@ -147,7 +139,6 @@ def outcome_counts(g, a, cause, d_ms: float, *, definition: str = "B",
     if np.any(fin & (cause != "")):
         raise ValueError("a packet cannot be both delivered and dropped")
 
-    # Reject impossible overlaps before assigning packets to mutually exclusive outcomes.
     hz = lead if horizon_lead_ms is None else horizon_lead_ms
     keep = valid_mask(g, hz, tick_ms, phase_ms, warmup_s, sim_limit_s)
     miss = miss_a(g, a, d_ms) if definition == "A" else miss_b(g, a, lead, tick_ms, phase_ms)
@@ -174,10 +165,7 @@ def miss_rate(g, a, d_ms: float, *, definition: str = "B", lead_ms: Optional[flo
               horizon_lead_ms: Optional[float] = None, tick_ms: float = T_PRIMARY_MS,
               phase_ms: float = 0.0, warmup_s: float = WARMUP_S,
               sim_limit_s: float = SIM_LIMIT_S) -> float:
-    """Miss rate over valid packets (lead time L = D unless ``lead_ms`` is given); NaN if none.
-
-    ``horizon_lead_ms`` as in :func:`outcome_counts`.
-    """
+    """Miss rate over valid packets (lead time L = D unless ``lead_ms`` is given); NaN if none."""
     lead = d_ms if lead_ms is None else lead_ms
     hz = lead if horizon_lead_ms is None else horizon_lead_ms
     g = np.asarray(g, dtype=np.float64)
@@ -222,18 +210,52 @@ def _integral_cdf(lo: float, hi: float, du, qu) -> float:
 
 
 def miss_a_from_quantiles(d_ms: float, delays_ms, p_loss: float = 0.0,
-                          levels: Sequence[float] = QUANTILE_LEVELS) -> float:
-    """P(miss_A) = p_loss + (1 - p_loss) * P(delay > D | delivered)."""
-    du, qu = _cdf_knots(delays_ms, levels)
+                          levels: Sequence[float] = QUANTILE_LEVELS,
+                          shift_ms: float = 0.0) -> float:
+    """P(miss_A) = p_loss + (1 - p_loss) * P(delay + shift_ms > D | delivered)."""
+    if shift_ms < 0.0:
+        raise ValueError("shift_ms must be non-negative")
+    shifted = np.asarray(delays_ms, dtype=np.float64) + float(shift_ms)
+    du, qu = _cdf_knots(shifted, levels)
     return p_loss + (1.0 - p_loss) * (1.0 - _cdf(d_ms, du, qu))
 
 
 def miss_b_from_quantiles(lead_ms: float, tick_ms: float, delays_ms, p_loss: float = 0.0,
-                          levels: Sequence[float] = QUANTILE_LEVELS) -> float:
-    """P(miss_B) = p_loss + (1 - p_loss) * (1/T) * integral_0^T P(delay > L + x) dx (uniform tick phase)."""
-    du, qu = _cdf_knots(delays_ms, levels)
+                          levels: Sequence[float] = QUANTILE_LEVELS,
+                          shift_ms: float = 0.0) -> float:
+    """P(miss_B) = p_loss + (1 - p_loss) * (1/T) * integral_0^T P(delay + shift_ms > L + x) dx."""
+    if shift_ms < 0.0:
+        raise ValueError("shift_ms must be non-negative")
+    shifted = np.asarray(delays_ms, dtype=np.float64) + float(shift_ms)
+    du, qu = _cdf_knots(shifted, levels)
     mean_cdf = _integral_cdf(lead_ms, lead_ms + tick_ms, du, qu) / tick_ms
     return p_loss + (1.0 - p_loss) * (1.0 - mean_cdf)
+
+
+def evaluate_retrospective_profile(
+    delays_ms: Sequence[float],
+    p_loss: float = 0.0,
+    *,
+    d_ms: float = 50.0,
+    lead_ms: Optional[float] = None,
+    tick_ms: float = T_PRIMARY_MS,
+    shift_ms: float = 0.0,
+    levels: Sequence[float] = QUANTILE_LEVELS,
+) -> Dict[str, float]:
+    """Retrospectively evaluate external protocol profiles (e.g., 20 Hz VDA 5050 teleoperation,
+    Soft-W-TSN COTS Residual Service Time ``shift_ms=rst_ms``, or Wi-STARK channel-switching
+    inaccessibility ``shift_ms=tau_ina_ms``) directly from the 25 exported conditional delay quantiles.
+    """
+    eff_lead = d_ms if lead_ms is None else float(lead_ms)
+    return {
+        "d_ms": float(d_ms),
+        "lead_ms": eff_lead,
+        "tick_ms": float(tick_ms),
+        "shift_ms": float(shift_ms),
+        "p_loss": float(p_loss),
+        "miss_A": miss_a_from_quantiles(d_ms, delays_ms, p_loss=p_loss, levels=levels, shift_ms=shift_ms),
+        "miss_B": miss_b_from_quantiles(eff_lead, tick_ms, delays_ms, p_loss=p_loss, levels=levels, shift_ms=shift_ms),
+    }
 
 
 # --------------------------------------------------------------------------- statistics (section 1.6)
@@ -249,11 +271,7 @@ def student_t_halfwidth(values: Sequence[float], confidence: float = 0.95) -> fl
 
 
 def wilson_upper(successes: int, trials: int, confidence: float = 0.95) -> float:
-    """Upper endpoint of the two-sided Wilson score interval.
-
-    In particular, a zero observed miss rate remains distinguishable from a
-    proven zero: for ``successes == 0`` this is ``z² / (n + z²)``.
-    """
+    """Upper endpoint of the two-sided Wilson score interval."""
     if trials <= 0 or successes < 0 or successes > trials:
         return float("nan")
     z = float(stats.norm.ppf(0.5 + confidence / 2.0))

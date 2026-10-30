@@ -194,3 +194,21 @@ def test_stage1_late_termination_separation():
     assert row["n_Drop_Queue"] == 1
     assert np.isclose(row["p_loss"], 0.25)          # only physical drops enter p_loss
     assert np.isclose(row["miss_B_50ms"], 0.75)     # late arrival + late termination + drop
+
+def test_retrospective_profile_and_residual_shift():
+    """Verify additive hardware/channel residual shift (Soft-W-TSN RST / Wi-STARK tau_ina)
+    and 20 Hz VDA 5050 teleoperation profile evaluation on the 25-quantile grid.
+    """
+    delays = np.linspace(1.0, 25.0, len(dm.QUANTILE_LEVELS))
+    base = dm.evaluate_retrospective_profile(delays, p_loss=0.0, d_ms=20.0, tick_ms=10.0, shift_ms=0.0)
+    shifted = dm.evaluate_retrospective_profile(delays, p_loss=0.0, d_ms=20.0, tick_ms=10.0, shift_ms=5.0)
+    assert shifted["miss_A"] > base["miss_A"]
+    assert shifted["miss_B"] > base["miss_B"]
+    assert shifted["miss_B"] <= shifted["miss_A"] + 1e-12
+    # Shifting delays by +5 ms against D=20 ms is identical to evaluating unshifted delays against D=15 ms
+    equiv_a = dm.miss_a_from_quantiles(15.0, delays, p_loss=0.0)
+    equiv_b = dm.miss_b_from_quantiles(15.0, 10.0, delays, p_loss=0.0)
+    assert np.isclose(shifted["miss_A"], equiv_a)
+    assert np.isclose(shifted["miss_B"], equiv_b)
+    with pytest.raises(ValueError, match="non-negative"):
+        dm.miss_a_from_quantiles(20.0, delays, shift_ms=-1.0)

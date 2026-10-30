@@ -63,3 +63,4 @@ agent/
 **/.codex/
 temp/
 report/*
+docs/proposal.md

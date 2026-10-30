@@ -1,6 +1,6 @@
 # Matrix Factory Twin: Architectural Decisions & Questions Log
 
-**Revision:** Oct 15, 2026. Campaign-readiness repair synchronizes the 25-level quantile contract, full packet ledger, global tick phases, serviceable 12 Mbps schedule, and a 22-replication floor pending the repaired pilot.
+**Revision:** Oct 18, 2026. Campaign-readiness repair synchronizes the 25-level quantile contract, full packet ledger, replication-global tick phases ($\phi_T$), serviceable 12 Mbps schedule, 4-protocol TSN characterization (VDA 5050, DDS-RTPS, OPC UA UADP, MQTT), and confirmed 22-replication floor (C8, Spike S1, and C9 pilot passed; see `docs/results.md`).
 
 Implementation references: deadline filters and packet outcomes are described in [SPEC-deadline-sink.md](SPEC-deadline-sink.md); slot admission and timer behavior are described in [SPEC-scheduled-dcf.md](SPEC-scheduled-dcf.md); lookup aggregation and interpolation are described in [SPEC-lookup-ner-integration.md](SPEC-lookup-ner-integration.md). The specifications explain how the locked decisions map to code.
 
@@ -46,12 +46,13 @@ Implementation references: deadline filters and packet outcomes are described in
 * $g \in \mathbb{R}^+$: Packet generation/creation timestamp at the application layer of the source host.
 * $a \in \mathbb{R}^+ \cup \{\infty\}$: Packet delivery/arrival timestamp at the application layer of the destination host ($a = \infty$ if the packet is dropped due to queue overflow, retry exhaustion, or simulation termination).
 * $T \in \mathbb{R}^+$: Digital twin discrete NER tick period. The twin uses a variable step $\Delta t \in [10\ \text{ms}, 1000\ \text{ms}]$; its finest quantum is $T_{\min} = 10\ \text{ms}$ ($100\ \text{Hz}$, `MIN_DT`). Definition B is evaluated on a uniform grid with primary $T = T_{\min} = 10\ \text{ms}$ and offline sensitivity at $T \in \{50, 500\}\ \text{ms}$ (§1.3.1).
+* $\phi_T \sim \mathcal{U}(0, T)$: Replication-global tick phase drawn once per replication on `rng-1` by `ExperimentCoordinator` for each $T \in \{10, 50, 500\}\ \text{ms}$.
 * $D_c \in \mathbb{R}^+$: Application-layer deadline threshold for traffic class $c$.
 * $L_c \in \mathbb{R}$: Application-layer lead time offset for traffic class $c$.
 * $\text{delay} = a - g$: End-to-end network latency ($\text{delay} = \infty$ for undelivered packets).
-* $c \in \{k \cdot T \mid k \in \mathbb{N}\}$: Scheduled discrete consumption instant within the digital twin execution engine.
+* $c = \phi_T + \left\lceil \frac{g - \phi_T + L_c}{T} \right\rceil \cdot T$: Scheduled discrete consumption instant within the digital twin execution engine.
 * $\text{TTL}_c \in \mathbb{R}^+$: Experiment watchdog for Orders/DDS, fixed at 50/5 ms. The sink tests the direct condition $a > g + \text{TTL}_c$; it does not round TTL to a tick.
-* $\Delta k_{\text{stale}} \in \mathbb{N}$: Discrete staleness (excess Age of Information, in ticks) of a delivered State/Telemetry packet: $\max\big(0, \lceil a/T \rceil - \lceil (g + L_c)/T \rceil\big)$.
+* $\Delta k_{\text{stale}} \in \mathbb{N}$: Discrete staleness (excess Age of Information, in ticks) of a delivered State/Telemetry packet: $\max\big(0, \lceil (a - \phi_T)/T \rceil - \lceil (g - \phi_T + L_c)/T \rceil\big)$.
 
 ---
 
@@ -68,7 +69,7 @@ $$\text{Miss}_A = \begin{cases} 1 & \text{if packet is lost } (a = \infty) \text
 
 ### 1.3 Definition B: Discrete Tick Grid Consumption Instant (Digital Twin Ingestion)
 The digital twin Next Event Request (NER) engine advances time in discrete steps of period $T$. An application event generated at $g$ with class lead time $L_c$ is scheduled for consumption at the discrete grid boundary:
-$$c = \left\lceil \frac{g + L_c}{T} \right\rceil \times T$$
+$$c = \phi_T + \left\lceil \frac{g - \phi_T + L_c}{T} \right\rceil \cdot T$$
 $$\text{Miss}_B = \begin{cases} 1 & \text{if packet is lost } (a = \infty) \text{ or } a > c \\ 0 & \text{if } a \le c \end{cases}$$
 
 #### Adopted Design Choice: Class Lead Time Equals Deadline ($L_c = D_c$)
@@ -76,10 +77,10 @@ $$\text{Miss}_B = \begin{cases} 1 & \text{if packet is lost } (a = \infty) \text
 
 #### Formal Analytical Derivation & Proof of Slack Dynamics
 1. **Available Time Slack:** Let $s = c - g$ denote the physical time elapsed between packet generation $g$ and the discrete consumption instant $c$. Substituting $L_c = D_c$:
-   $$s = \left\lceil \frac{g + D_c}{T} \right\rceil \times T - g$$
+   $$s = \phi_T + \left\lceil \frac{g - \phi_T + D_c}{T} \right\rceil \cdot T - g$$
 2. **Bounds on Slack:** By the mathematical definition of the ceiling function $\lceil x \rceil = x + (1 - (x \bmod 1))$:
    $$s \in [D_c,\, D_c + T)$$
-   If packet generation phase $(g \bmod T)$ is uniformly distributed over the interval $[0, T)$, the available slack $s$ is uniformly distributed:
+   If packet generation phase $((g - \phi_T) \bmod T)$ is uniformly distributed over the interval $[0, T)$, the available slack $s$ is uniformly distributed:
    $$s \sim \mathcal{U}(D_c,\, D_c + T)$$
 3. **Necessary vs. Sufficient Condition:**
    Because $s \ge D_c$ for all packets, a packet whose transfer delay satisfies $D_c < \text{delay} \le s$ arrives **before** the consumption tick $c$ and is consumed on time. Consequently:
@@ -88,7 +89,7 @@ $$\text{Miss}_B = \begin{cases} 1 & \text{if packet is lost } (a = \infty) \text
    * Across any sample of traffic, the aggregate miss rate under Definition B is strictly less than or equal to Definition A:
      $$\mathbb{E}[\text{Miss}_B] \le \mathbb{E}[\text{Miss}_A]$$
 4. **Continuous Expectation Integral:**
-   Assuming network delay is a random variable independent of generation phase $u = (g \bmod T) \sim \mathcal{U}(0, T)$:
+   Assuming network delay is a random variable independent of generation phase $u = ((g - \phi_T) \bmod T) \sim \mathcal{U}(0, T)$:
    $$P(\text{Miss}_B) = \frac{1}{T} \int_0^T P(\text{delay} > D_c + x)\, dx \qquad (\text{with } P(\text{delay} > y) = 1 \text{ for lost packets})$$
    For a deterministic network delay $\tau$:
    $$P(\text{Miss}_B) = \frac{\min\big(\max(\tau - D_c,\, 0),\, T\big)}{T}$$
@@ -111,7 +112,7 @@ The heuristic $L_c = T - D_c$ previously proposed in preliminary working notes h
 | Active AMR step | Active AMRs request `soonestNeed = min(0.5, max(dwellRemaining, 0.05))`, i.e. steps of $50\ \text{ms}$ to $500\ \text{ms}$. | `AMRArtifact.updatePositions()` (`AMRArtifact.java:495, 499`) |
 | Idle / macro step | $1000\ \text{ms}$ ($1\ \text{Hz}$) when no sooner NER is pending; also the electricity spot-price update cadence. | `MAX_DT` |
 | Quorum constant | `TICK_QUORUM_TIMEOUT_MS = 10` is a **wall-clock** thread barrier (`nerLatch.await(10, ms)`) for the 13 JaCaMo agents, not a simulated duration. On timeout the TMC increments `droppedNerCount` and advances time anyway. | `MainSimulator.java:55, 255-258` |
-| Consumption instant | Target timestamp $t_{\text{req}} = g + L_c$ is consumed at the first tick $c = k \cdot T \ge t_{\text{req}}$, i.e. $c = \lceil (g + L_c)/T \rceil \cdot T$ (exact on a uniform grid). | `MainSimulator.java:422-428`; e.g. `BaseStationArtifact.java:202`, `AMRArtifact.java:499` |
+| Consumption instant | Target timestamp $t_{\text{req}} = g + L_c$ is consumed at the first tick $c = \phi_T + k \cdot T \ge t_{\text{req}}$, i.e. $c = \phi_T + \lceil (g - \phi_T + L_c)/T \rceil \cdot T$ (exact on a uniform grid). | `MainSimulator.java:422-428`; e.g. `BaseStationArtifact.java:202`, `AMRArtifact.java:499` |
 | Boundary | Non-strict: the Time Advance Grant fires when `time >= entry.requestedNextTime()`, so $a \le c$ is on time. | `issueTimeAdvanceGrant(double, int)` |
 | Clock stall | Never. A late event does not block simulated time. | `MainSimulator.java:255-258` |
 
@@ -122,10 +123,10 @@ $$P(\text{Miss}_B(T)) = \frac{1}{T}\int_0^T P(\text{delay} > L_c + x)\,dx.$$
 
 | Traffic class | Late behaviour in the twin | Mechanism | Metric treatment |
 | :--- | :--- | :--- | :--- |
-| **State** (VDA 5050, AMR → FMS) and **Telemetry** (OPC UA/MQTT, Station → FMS) | **Zero-Order Hold.** Tick $c$ reuses the previous snapshot; the delayed update takes effect at $c' = \lceil a/T \rceil \cdot T$ unless a newer sample overwrites it. | `assembleTelemetryFrame()` reads volatile snapshots (`MainSimulator.java:301-420`) | $\text{Miss}_B = 1$ at tick $c$; graded staleness $\Delta k_{\text{stale}}$ for surviving packets. |
+| **State** (VDA 5050, AMR → FMS) and **Telemetry** (OPC UA/MQTT, Station → FMS) | **Zero-Order Hold.** Tick $c$ reuses the previous snapshot; the delayed update takes effect at $c' = \phi_T + \lceil (a - \phi_T)/T \rceil \cdot T$ unless a newer sample overwrites it. | `assembleTelemetryFrame()` reads volatile snapshots (`MainSimulator.java:301-420`) | $\text{Miss}_B = 1$ at tick $c$; graded staleness $\Delta k_{\text{stale}}$ for surviving packets. |
 | **Orders** (VDA 5050, FMS → AMR) and **DDS** (Station → FMS) | **Delayed consumption** while $a \le g + \text{TTL}$; discarded once $a > g + \text{TTL}$. | Experiment surrogates: Orders 50 ms, DDS 5 ms. | $\text{Miss}_B = 1$ at tick $c$; TTL discard is recorded separately and uses the direct arrival comparison. |
 
-The code distinguishes two meanings of $D_c$: for control/coordination packets it is the protocol timeout ($c = \lceil (g + D_c)/T \rceil \cdot T$, late packets killed by the watchdog); for periodic state/telemetry it is a freshness deadline (see the open note in §1.3.2).
+The code distinguishes two meanings of $D_c$: for control/coordination packets it is the protocol timeout ($c = \phi_T + \lceil (g - \phi_T + D_c)/T \rceil \cdot T$, late packets killed by the watchdog); for periodic state/telemetry it is a freshness deadline (see the open note in §1.3.2).
 
 ---
 
@@ -346,17 +347,13 @@ Of the 72 baseline parameter grid points ($6\ \text{cells} \times 4\ N \times 3\
 ---
 
 #### Question Q6: Real VDA 5050 Message Sizing & Serialization Schemas
-* **Formal Inquiry:** Empirical serialized message lengths and transmission frequencies for VDA 5050 `order` and `state` topics.
-* **Normative Analysis of VDA 5050 v3.0.0 JSON Schemas [4]:**
-  * **`state` Topic (`.../state`):** Contains header metadata, orderId, orderUpdateId, lastNodeId, driving flag, operatingMode, agvPosition ($x, y, \theta$, mapId, deviationRange), velocity ($v_x, v_y, \omega$), batteryState (charge, voltage, health), nodeStates array, edgeStates array, errors array, and safetyState.
-    * *Minimal State:* Base structure without trajectory history serializes to $\approx 600\ \text{to } 800\ \text{B}$ of UTF-8 JSON.
-    * *Nominal State:* Standard active navigation payload with node/edge progress measures $\approx 950\ \text{to } 1200\ \text{B}$. Baseline **1000 B** represents an accurate empirical midpoint.
-  * **`order` Topic (`.../order`):** Contains header metadata, orderId, orderUpdateId, nodes array (nodeId, sequenceId, nodePosition, actions), and edges array (edgeId, sequenceId, startNodeId, endNodeId, trajectory knots, actions).
-    * *Minimal Order (1 node, 1 edge):* $\approx 450\ \text{B}$.
-    * *Standard Move Order (2 nodes, 1 edge, NURBS trajectory):* $\approx 600\ \text{B}$.
-    * *Complex Order (5 nodes, 4 edges, multiple actions):* $\approx 1200\ \text{to } 1800\ \text{B}$. Baseline **600 B** represents a standard single-hop dispatch order.
-  * **Factsheet Protocol Limits (`.../factsheet`):** The VDA 5050 factsheet defines protocol constraints: `protocolLimits.maxMessageSize` (typically $64\ \text{KB}$), `protocolLimits.maxOrderNodes`, and minimum inter-order timing.
-  * **Resolution (Oct 14, 2026, Decision):** State: $1000\text{ B}$ @ $10\text{ Hz}$ (`uniform(90ms, 110ms)`); Orders: $600\text{ B}$ @ $5\text{ Hz}$ (`exponential(200ms)`). Validated against VDA 5050 v3.0.0 UTF-8 JSON schemas; unsourced node/edge formula deprecated.
+* **Formal Inquiry:** Empirical serialized message lengths and transmission frequencies for VDA 5050 `order` and `state` topics, and their interaction with IEEE 802.1Qbv TAS gate windows.
+* **Normative & Empirical Analysis (VDA 5050 v3.0.0 [4] & Wagner et al., IEEE WFCS 2026 [20]):**
+  * **Linear Graph-Horizon Scaling:** Wagner et al. (2026) and the open-source `VDA-5050-Traffic-Generator` establish that VDA 5050 UTF-8 JSON message sizes scale linearly with the number of trajectory graph nodes ($n_{\text{nodes}}$) and edges ($n_{\text{edges}}$):
+    $$\text{Size}_{\text{State}}(n_{\text{nodes}}, n_{\text{edges}}) \approx 522 + 75 \cdot n_{\text{nodes}} + 91 \cdot n_{\text{edges}}\ [\text{Bytes}]$$
+    $$\text{Size}_{\text{Order}}(n_{\text{nodes}}, n_{\text{edges}}) \approx 206 + 154 \cdot n_{\text{nodes}} + 434 \cdot n_{\text{edges}}\ [\text{Bytes}]$$
+  * **`State` Validation (`1000 B` @ `10 Hz`):** For an active local navigation horizon of $n_{\text{nodes}} = n_{\text{edges}} = 3$, $\text{Size}_{\text{State}}(3, 3) = 522 + 166(3) = 1020\ \text{B}$ at a nominal $10\ \text{Hz}$ ($100\ \text{ms}$) cadence, validating the locked `1000 B` at `uniform(90ms, 110ms)` specification within $2\%$.
+  * **The TAS Guard-Band Deadlock Proof for `Orders` (`600 B` @ `5 Hz`):** Full multi-node VDA 5050 routes ($n \in [4, 20]$, spanning $2558\ \text{B}$ to $11,966\ \text{B}$) exceed the $1500\ \text{B}$ Ethernet MTU for any $n \ge 3$ ($1970\ \text{B}$), forcing MTU fragmentation into $1470\ \text{B}$ wire frames ($t_{\text{tx}} = 117.6\ \mu\text{s}$ at $100\ \text{Mbps}$). Because the `TC3` (`Orders`) GCL window on `eth[1]` is $w_{\text{TC3}} = 100\ \mu\text{s}$ ($[0, 100)\ \mu\text{s}$), INET's implicit guard band ($t_{\text{now}} + t_{\text{tx}} \le t_{\text{close}}$) enforces a strict physical wire ceiling of $L_{\text{wire, max}}^{\text{TC3}} = 100\ \mu\text{s} \times 12.5\ \text{B}/\mu\text{s} = 1250\ \text{B}$. Any $1470\ \text{B}$ fragment permanently fails gate admission on `eth[1]` (causing perpetual head-of-line deadlock) and exceeds the $550\ \mu\text{s}$ admission threshold of the $560\ \mu\text{s}$ AP downlink TDMA slot at $12\ \text{Mbps}$. Consequently, `Orders` (`600 B`, $53.3/53.6\ \mu\text{s}$ on wire) is formally characterized as a **unit sliding-horizon dispatch regime** ($n_{\text{nodes}} = 1, n_{\text{edges}} \in \{0, 1\} \implies [360, 794]\ \text{B}$) combined with VDA 5050 `instantActions` ($\approx 293\ \text{B}$).
 
 ---
 
@@ -396,8 +393,8 @@ Of the 72 baseline parameter grid points ($6\ \text{cells} \times 4\ N \times 3\
 | **Lookup Table Schema** | Summary and eCDF CSV/JSON plus a per-replication CSV; quantile-space interpolation with monotone PCHIP | Decision | The replication table enables paired six-cell contrasts while the other two remain the twin interface. |
 | **Telemetry Process** | Poisson arrival process (`exponential(${telInterval})`) per station; desynchronized offset | Decision | Poisson arrivals induce queuing bursts at $\rho \approx 0.8$, providing the conservative benchmark for FIFO. Dynamic initial offset `uniform(0s, ${telInterval})` guarantees desynchronization. |
 | **Radio Scheduled Regime**| `ScheduledDcf` with explicit offset/stride intervals and direction-specific 12 Mbps slots | Implemented; acceptance passed | Service meets or exceeds offered State and Orders load through N=80. At N=80/12 Mbps, 850 µs State and 560 µs Orders slots form a 90 ms cycle, avoiding the two-packet accumulation observed when the cycle exceeded the minimum State interarrival. Root parameter `wirelessPhyRate` drives this geometry and is bound to the WLAN bitrate by the same `phyRate` factor. Ten-second N=40/54 and N=80/12 runs recorded zero scheduled retries; the matched CSMA control recorded retry activity. |
-| **Tick & Consumption Semantics** | Variable-step NER with $T_{\min} = 10\ \text{ms}$; $c = \lceil (g + L_c)/T \rceil T$; on time iff $a \le c$; no clock stall | Confirmed (maintainer) | `MainSimulator.java:56-57, 260-266, 422-428`. Primary Definition B at $T = 10\ \text{ms}$, offline sensitivity at $50$ and $500\ \text{ms}$ (§1.3.1). |
-| **Late-Arrival Semantics** | State/Telemetry: ZOH and delayed consumption at $\lceil a/T \rceil T$. Orders/DDS: delayed consumption until $g + \text{TTL}$, then discard | Confirmed (maintainer) | `assembleTelemetryFrame()`, `TimerArtifact.evaluateTTLs()`. The table stores $p_{\text{loss}}$ and the finite delay eCDF separately so the twin can apply either rule (§1.5 item 6). |
+| **Tick & Consumption Semantics** | Variable-step NER with $T_{\min} = 10\ \text{ms}$; $c = \phi_T + \lceil (g - \phi_T + L_c)/T \rceil T$; on time iff $a \le c$; no clock stall | Confirmed (maintainer) | `MainSimulator.java:56-57, 260-266, 422-428`. Primary Definition B at $T = 10\ \text{ms}$, offline sensitivity at $50$ and $500\ \text{ms}$ (§1.3.1). |
+| **Late-Arrival Semantics** | State/Telemetry: ZOH and delayed consumption at $\phi_T + \lceil (a - \phi_T)/T \rceil T$. Orders/DDS: delayed consumption until $g + \text{TTL}$, then discard | Confirmed (maintainer) | `assembleTelemetryFrame()`, `TimerArtifact.evaluateTTLs()`. The table stores $p_{\text{loss}}$ and the finite delay eCDF separately so the twin can apply either rule (§1.5 item 6). |
 | **Lookup Consumption Mode** | Stochastic inverse-transform sampling with a per-flow seeded PRNG; summary (expected-value) mode kept as fallback | Decision | Keeps `SeededReplaySeed1Test` deterministic under multi-threaded agent scheduling (§5.5). |
 | **Factory Scale & Topology** | 4 stations, $100\ \text{Mbps}$ wired, 802.11g at $54\ \text{Mbps}$; fleet sweep $N \in \{5, 10, 20, 40, 80\}$ (Q5) | Decision | Controlled scale model: keeps the backbone near saturation so bottleneck migration can be observed (Jain [9]); $\rho \approx 0.28 / 0.83 / 1.61$ at $N = 40$ (including DDS). $N = 80$ is the stress point; PHY-rate sensitivity is handled in Q8. |
 | **Spatial Layout** | $200\ \text{m} \times 200\ \text{m}$ hall, AP at $(100, 100)$, stationary AMRs within $\pm 30\ \text{m}$; dedicated spatial RNG stream (Q5) | Decision | Maximum AP distance $42.43\ \text{m}$, maximum AMR-to-AMR distance $84.85\ \text{m}$, both well above the sensitivity margin (§6): no hidden terminals. Stream isolation in checklist C8. |
@@ -438,6 +435,15 @@ Of the 72 baseline parameter grid points ($6\ \text{cells} \times 4\ N \times 3\
 #### Architectural Deductions:
 1. **Refutation of Heuristic Claim:** Orders traverse an exclusive egress port (`tsnSwitch -> ap`) and never share a buffer with telemetry.
 2. **Localization of TSN Benefit:** Under Option 7B, the scheduling benefits of IEEE 802.1Q priority and IEEE 802.1Qbv TAS in the wired backbone manifest on the `tsnSwitch -> fms` port, protecting both DDS coordination and State reports from telemetry overflow.
+
+### 4.1 Four-Protocol Characterization & TSN Validation Matrix
+
+| Protocol | Mapped Flow (`omnetpp.ini`) | IEC/IEEE 60802 / IIC Class | Header & Payload Structure | TSN & Hybrid Validation Invariant |
+| :--- | :--- | :---: | :--- | :--- |
+| **VDA 5050 v3.0.0** | `Orders` (`TC 3`, Port `5051`) & `State` (`TC 1`, Port `5050`) | `ALEV_TT` (`Orders`) & `CASYN_TT` (`State`) | JSON over co-located broker surrogate: `State(3,3) = 1020 B` (`1000 B` locked); `Order(1,0..1) = 360..794 B` (`600 B` locked). C-tag (`4 B`) stripped on `eth[1]` toward AP. | Constraining `Orders` to $n=1$ prevents MTU fragmentation ($1470\ \text{B} = 117.6\ \mu\text{s}$), which would violate the $1250\ \text{B}$ ($100\ \mu\text{s}$) `TC 3` implicit guard band on `eth[1]` and the $550\ \mu\text{s}$ AP TDMA slot threshold at $12\ \text{Mbps}$. |
+| **OMG DDS / DDSI-RTPS v2.3** | `DDS` (`TC 2`, Port `5100`, Option 7B) | `CASYN_TT` (Cyclic-Asynchronous) | Native UDP unicast (`station[i] -> fms`): `20 B` RTPS header + `12 B` `INFO_TS` + `24 B` `DATA` submessage + `144 B` CDR interlocking state = `200 B` (`270 B` wire). | Because `TC 3` is empty on `eth[0]`, `DDS` is the highest active priority on the congested uplink. Under `Wired_Prio`, max lower-priority blocking is $117.6\ \mu\text{s}$; under `Wired_TAS`, the $[100, 300)\ \mu\text{s}$ window fits $9$ frames/ms ($19.44\ \text{Mbps}$ vs. $0.864\ \text{Mbps}$ offered), bounding gate wait to $\le 821.6\ \mu\text{s} \ll D_{\text{dds}} = 5\ \text{ms}$. |
+| **OPC UA Part 14 PubSub (UADP)** | `Telemetry` (`TC 0`, Port `5200`) | `CFDI_TT` + Best Effort | Broker-less binary UADP over UDP: station `WriterGroup` aggregates periodic `DataSetMessages` (`CyclicDataset=True`, `Key Frame`) into one `1400 B` `NetworkMessage` (`1470 B` wire) with `PCP = 0`. | Maximizes Ethernet frame efficiency without IP fragmentation ($\le 1472\ \text{B}$). In `Wired_TAS`, the $[500, 1000)\ \mu\text{s}$ window caps admission at $\lfloor 500 / 117.6 \rfloor = 4$ frames/ms ($44.8\ \text{Mbps}$ payload ceiling), isolating `TC 1..3` from background overload up to $149.3\ \text{Mbps}$. |
+| **OASIS MQTT v5.0** | Transport surrogate for VDA 5050 & IIoT logs | Open-loop UDP surrogate (`rng-1` parity) | Full stack overhead is `42 B` VDA JSON hdr + `2 B` MQTT + `20 B` TCP + `40 B` IPv6. Abstracted to open-loop UDP with broker co-located on FMS. | Co-located FMS broker removes a 2nd switch traversal. Open-loop UDP prevents TCP `cwnd` throttling after FIFO drops, eliminates HoL blocking on ZOH `State` flows, and prevents reverse-path TCP `ACK` / `PUBACK` frames from doubling DCF contention or consuming `ScheduledDcf` slots. |
 
 ---
 
@@ -580,5 +586,6 @@ $$\text{Schema: } (\text{cell},\, \text{class},\, N_{\text{AMR}},\, \lambda_{\te
 17. **[17] K. Zanbouri, M. Noor-A-Rahim, J. John, C. J. Sreenan, H. V. Poor, and D. Pesch:** *A comprehensive survey of wireless Time-Sensitive Networking (TSN): Architecture, technologies, applications, and open issues*, IEEE Communications Surveys & Tutorials, vol. 27, no. 4, pp. 2129–2155, 2025, doi: 10.1109/COMST.2024.3486618. (Also Proposal reference [7].)
 18. **[18] V. M. Panaretos and Y. Zemel:** *Statistical Aspects of Wasserstein Distances*, Annual Review of Statistics and Its Application, 2019.
 19. **[19] C. Villani:** *Optimal Transport: Old and New*, Springer, 2009.
+20. **[20] M. Wagner, P. Ekrad, et al.:** *Empirical Characterization and Traffic Generation for VDA 5050 in Industrial AGV Networks*, IEEE International Workshop on Factory Communication Systems (WFCS), 2026.
 
 > **Citations not adopted (could not be verified on Oct 14):** Gallant et al., arXiv:2608.18850; Macias-Rivera et al., *Telecom* 7(5), 124; Duan et al., *IEEE Wireless Commun. Lett.* 15, 4986–4990; the Inoue/Takine Age-of-Information book chapter and Vecchio, arXiv:2405.05849 as quoted in the working session. Verify the originals before citing them in a report.

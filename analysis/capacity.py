@@ -1,18 +1,13 @@
-#!/usr/bin/env python3
-"""Back-of-envelope capacity model for the Matrix Factory Twin.
+"""Back-of-envelope capacity and TSN protocol characterization model for the Matrix Factory Twin.
 
 Purpose: choose the P3 sweep levels (fleet size N, PHY rate, telemetry rate) so
-that both domains are driven from lightly loaded to saturated, instead of
-guessing. This is an analytic ESTIMATE, not a simulation result:
-  * 802.11 timing is approximate 802.11g ERP-OFDM (values below); replace the
-    exchange times with INET's measured frameSequenceDuration from a single-AMR,
-    no-load run as soon as you have one.
-  * Utilization ignores collisions and retries, so real saturation starts
-    EARLIER than the numbers here (treat them as a lower bound on load).
+that both domains are driven from lightly loaded to saturated, and analytically
+validate the 4 industrial protocols (VDA 5050, DDS-RTPS, OPC UA PubSub UADP, and
+MQTT) against the IEEE 802.1Q / 802.1Qbv TSN switch and IEEE 802.11 MAC.
 
 Usage:  python3 analysis/capacity.py            # prints Markdown to stdout
         python3 analysis/capacity.py --out docs/capacity.md
-Keep the traffic constants in sync with docs/parameters.md (section 4).
+Keep the traffic constants in sync with docs/parameters.md (section 4 & 6).
 """
 import argparse
 import math
@@ -35,6 +30,7 @@ DDS_B, DDS_HZ = 200, 100.0          # station -> FMS (Option 7B, 4 stations)
 TEL_B = 1400                        # station -> FMS (wired only)
 N_STATIONS = 4
 TEL_INTERVALS = (2e-3, 600e-6, 300e-6)
+TEL_SWEEP_INTERVALS_US = (2000, 996, 747, 600, 527, 472, 407, 300)
 
 # ---- wired -------------------------------------------------------------------
 WIRE_RATE = 100e6
@@ -42,6 +38,7 @@ WIRE_OVERHEAD_B = 58 + 12           # headers+preamble+802.1Q tag (58 B) + inter
 WIRE_OVERHEAD_UNTAGGED_B = 54 + 12  # untagged egress after C-tag stripping = 66 B
 TEL_WINDOW = 500e-6                 # TAS telemetry window
 GATE_CYCLE = 1e-3
+BUFFER_PKTS = 80
 
 PHY_RATES = (54e6, 24e6, 12e6, 6e6)
 FLEET = (5, 10, 20, 40, 80, 120, 200)
@@ -160,6 +157,34 @@ def main():
       + ". With the locked 1 ms GCL the orders window carries at most "
       f"{int(100e-6 // wire_frame_time(ORDER_B, WIRE_OVERHEAD_UNTAGGED_B))} frame per 1 ms cycle "
       f"({1/GATE_CYCLE:.0f} orders/s), so check it against N x {ORDER_HZ:g} orders/s.\n")
+
+    # 5. 4-Protocol Characterization Matrix
+    w("## 5. Four-Protocol Stack Characterization (VDA 5050, DDS-RTPS, OPC UA UADP, MQTT)\n")
+    w("| Protocol & Normative Profile | Simulated Class (Port / PCP / TC) | L7/L4 Encapsulation & Sizing Formula | IEC/IEEE 60802 Class | TSN & Hybrid Validation Constraint |")
+    w("|---|---|---|---|---|")
+    w("| **VDA 5050 v3.0.0** (`order` + `instantActions`) | `Orders` (`5051` / PCP 6 / TC3) | UTF-8 JSON: `206 + 154*n_nodes + 434*n_edges` B. Unit sliding horizon `n=1` -> `360..794` B (`600 B` locked). C-tag stripped toward AP (`666 B` wire). | `ALEV_TT` (Control Events, aperiodic) | Full orders (`n in [4,20]`, `2.56..11.97 KB`) fragment to `1470 B` (`117.6 us`), violating `TC3` `100 us` (`1250 B`) guard band (deadlock on `eth[1]`). |")
+    w("| **VDA 5050 v3.0.0** (`state` + `visualization`) | `State` (`5050` / PCP 2 / TC1) | UTF-8 JSON: `522 + 75*n_nodes + 91*n_edges` B. Active local horizon `n=3` -> `1020 B` (`1000 B` locked, `1070 B` wire). | `CASYN_TT` (Cyclic-Async, 10 Hz, ZOH) | Hits `eth[0]` at 5 phases (54 Mbps, `gcd(400,1000)=200 us`) or 20 phases (12 Mbps, `gcd(850,1000)=50 us`). Max `ScheduledDcf` cycle at `N=80, 12 Mbps` is `90 ms`. |")
+    w("| **OMG DDS v1.4 / DDSI-RTPS v2.3** | `DDS` (`5100` / PCP 4 / TC2) | Native UDP: `20 B` RTPS hdr + `12 B` `INFO_TS` + `24 B` `DATA` + `144 B` CDR = `200 B` (`270 B` wire). | `CASYN_TT` (100 Hz +/- 5% jitter, Watchdog KILL) | Shares `eth[0]` with `State` and `Telemetry` (`TC3` is empty on `eth[0]`, so `DDS` is highest active priority). `200 us` window fits 9 frames/ms (`19.44 Mbps` vs `0.864 Mbps`). |")
+    w("| **OPC UA Part 14 PubSub (UADP)** | `Telemetry` (`5200` / PCP 0 / TC0) | Broker-less binary UADP over UDP: `WriterGroup` bundles multiple `DataSetMessages` (`Key Frame`) into `1400 B` `NetworkMessage` (`1470 B` wire). | `CFDI_TT` + Best Effort (ZOH secondary) | Fits Ethernet MTU without IP fragmentation. Throttled by TAS `[500, 1000) us` guard band to 4 frames/ms (`44.8 Mbps` payload ceiling) to protect `TC1..TC3`. |")
+    w("| **OASIS MQTT v5.0** (Co-located Broker Surrogate) | Transport layer for VDA 5050 & IIoT diagnostics | Native MQTT/TCP/IPv6 adds `42 B` VDA hdr + `2 B` MQTT + `20 B` TCP + `40 B` IPv6. Modeled via open-loop UDP to co-located FMS broker. | Transport abstraction (Stream 1 parity) | Co-locating broker on FMS eliminates 2nd switch hop. Open-loop UDP prevents TCP `cwnd` throttling after FIFO drops and avoids reverse TCP ACKs consuming DCF/TDMA slots. |\n")
+
+    # 6. TSN Validation: Worst-Case Delay Bounds (FIFO vs Strict Priority vs TAS)
+    t_tel_us = wire_frame_time(TEL_B) * 1e6
+    t_state_us = wire_frame_time(STATE_B) * 1e6
+    t_dds_us = wire_frame_time(DDS_B) * 1e6
+    t_ord_us = wire_frame_time(ORDER_B, WIRE_OVERHEAD_UNTAGGED_B) * 1e6
+    fifo_max_ms = BUFFER_PKTS * t_tel_us / 1e3
+    tas_dds_wait_us = (1000.0 - 200.0) + t_dds_us
+    tas_state_wait_us = (1000.0 - 200.0) + t_state_us
+    tas_ord_wait_us = (1000.0 - 100.0) + t_ord_us
+
+    w("## 6. TSN Switch Validation: Single-Packet Serialization, Strict Priority Blocking, and TAS Gate Wait\n")
+    w("| Traffic Class (Port) | Wire Serialization `t_tx` (us) | FIFO Saturation Max Queue Delay (`80 pkts`) | 802.1Q Strict Priority Non-Preemptive Blocking (`Wired_Prio`) | 802.1Qbv TAS Single-Arrival Max Gate Wait + `t_tx` (`Wired_TAS`) |")
+    w("|---|---|---|---|---|")
+    w(f"| `Orders` (`TC3`, `eth[1]`) | {t_ord_us:.1f} us (`666 B` untagged) | Dedicated downlink port (no telemetry) | 0.0 us (`TC0..TC2` empty on `eth[1]`) | {tas_ord_wait_us + t_ord_us:.1f} us (`900.0 us` closed + `{t_ord_us:.1f} us` guard margin + `{t_ord_us:.1f} us` tx) |")
+    w(f"| `DDS` (`TC2`, `eth[0]`) | {t_dds_us:.1f} us (`270 B` tagged) | {fifo_max_ms:.3f} ms (> `5 ms` deadline -> misses + drops) | {t_tel_us:.1f} us (1 residual `Telemetry` frame; `TC3` empty on `eth[0]`) | {tas_dds_wait_us + t_dds_us:.1f} us (`{tas_dds_wait_us:.1f} us` max wait after `278.4 us` cutoff + `{t_dds_us:.1f} us` tx) |")
+    w(f"| `State` (`TC1`, `eth[0]`) | {t_state_us:.1f} us (`1070 B` tagged) | {fifo_max_ms:.3f} ms (buffer overflow drops above `95 Mbps`) | {t_tel_us:.1f} us lower-priority block + `DDS` burst (`4 * 21.6 = 86.4 us`) | {tas_state_wait_us + t_state_us:.1f} us (`{tas_state_wait_us:.1f} us` max wait after `414.4 us` cutoff + `{t_state_us:.1f} us` tx) |")
+    w(f"| `Telemetry` (`TC0`, `eth[0]`) | {t_tel_us:.1f} us (`1470 B` tagged) | {fifo_max_ms:.3f} ms | Preempted between frames by `TC1` and `TC2` | Throttled to 4 frames/cycle (`44.8 Mbps` payload ceiling) |\n")
 
     text = "\n".join(out)
     if args.out:

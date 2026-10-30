@@ -54,3 +54,22 @@ Values include headers and the 12 B gap. Under TAS, telemetry fits 4 frames per 
 
 Orders on the switch-to-AP port: N=5: 0.13 Mbps, N=10: 0.27 Mbps, N=20: 0.53 Mbps, N=40: 1.07 Mbps, N=80: 2.13 Mbps, N=120: 3.20 Mbps, N=200: 5.33 Mbps. With the locked 1 ms GCL the orders window carries at most 1 frame per 1 ms cycle (1000 orders/s), so check it against N x 5 orders/s.
 
+## 5. Four-Protocol Stack Characterization (VDA 5050, DDS-RTPS, OPC UA UADP, MQTT)
+
+| Protocol & Normative Profile | Simulated Class (Port / PCP / TC) | L7/L4 Encapsulation & Sizing Formula | IEC/IEEE 60802 Class | TSN & Hybrid Validation Constraint |
+|---|---|---|---|---|
+| **VDA 5050 v3.0.0** (`order` + `instantActions`) | `Orders` (`5051` / PCP 6 / TC3) | UTF-8 JSON: `206 + 154*n_nodes + 434*n_edges` B. Unit sliding horizon `n=1` -> `360..794` B (`600 B` locked). C-tag stripped toward AP (`666 B` wire). | `ALEV_TT` (Control Events, aperiodic) | Full orders (`n in [4,20]`, `2.56..11.97 KB`) fragment to `1470 B` (`117.6 us`), violating `TC3` `100 us` (`1250 B`) guard band (deadlock on `eth[1]`). |
+| **VDA 5050 v3.0.0** (`state` + `visualization`) | `State` (`5050` / PCP 2 / TC1) | UTF-8 JSON: `522 + 75*n_nodes + 91*n_edges` B. Active local horizon `n=3` -> `1020 B` (`1000 B` locked, `1070 B` wire). | `CASYN_TT` (Cyclic-Async, 10 Hz, ZOH) | Hits `eth[0]` at 5 phases (54 Mbps, `gcd(400,1000)=200 us`) or 20 phases (12 Mbps, `gcd(850,1000)=50 us`). Max `ScheduledDcf` cycle at `N=80, 12 Mbps` is `90 ms`. |
+| **OMG DDS v1.4 / DDSI-RTPS v2.3** | `DDS` (`5100` / PCP 4 / TC2) | Native UDP: `20 B` RTPS hdr + `12 B` `INFO_TS` + `24 B` `DATA` + `144 B` CDR = `200 B` (`270 B` wire). | `CASYN_TT` (100 Hz +/- 5% jitter, Watchdog KILL) | Shares `eth[0]` with `State` and `Telemetry` (`TC3` is empty on `eth[0]`, so `DDS` is highest active priority). `200 us` window fits 9 frames/ms (`19.44 Mbps` vs `0.864 Mbps`). |
+| **OPC UA Part 14 PubSub (UADP)** | `Telemetry` (`5200` / PCP 0 / TC0) | Broker-less binary UADP over UDP: `WriterGroup` bundles multiple `DataSetMessages` (`Key Frame`) into `1400 B` `NetworkMessage` (`1470 B` wire). | `CFDI_TT` + Best Effort (ZOH secondary) | Fits Ethernet MTU without IP fragmentation. Throttled by TAS `[500, 1000) us` guard band to 4 frames/ms (`44.8 Mbps` payload ceiling) to protect `TC1..TC3`. |
+| **OASIS MQTT v5.0** (Co-located Broker Surrogate) | Transport layer for VDA 5050 & IIoT diagnostics | Native MQTT/TCP/IPv6 adds `42 B` VDA hdr + `2 B` MQTT + `20 B` TCP + `40 B` IPv6. Modeled via open-loop UDP to co-located FMS broker. | Transport abstraction (Stream 1 parity) | Co-locating broker on FMS eliminates 2nd switch hop. Open-loop UDP prevents TCP `cwnd` throttling after FIFO drops and avoids reverse TCP ACKs consuming DCF/TDMA slots. |
+
+## 6. TSN Switch Validation: Single-Packet Serialization, Strict Priority Blocking, and TAS Gate Wait
+
+| Traffic Class (Port) | Wire Serialization `t_tx` (us) | FIFO Saturation Max Queue Delay (`80 pkts`) | 802.1Q Strict Priority Non-Preemptive Blocking (`Wired_Prio`) | 802.1Qbv TAS Single-Arrival Max Gate Wait + `t_tx` (`Wired_TAS`) |
+|---|---|---|---|---|
+| `Orders` (`TC3`, `eth[1]`) | 53.3 us (`666 B` untagged) | Dedicated downlink port (no telemetry) | 0.0 us (`TC0..TC2` empty on `eth[1]`) | 1006.6 us (`900.0 us` closed + `53.3 us` guard margin + `53.3 us` tx) |
+| `DDS` (`TC2`, `eth[0]`) | 21.6 us (`270 B` tagged) | 9.408 ms (> `5 ms` deadline -> misses + drops) | 117.6 us (1 residual `Telemetry` frame; `TC3` empty on `eth[0]`) | 843.2 us (`821.6 us` max wait after `278.4 us` cutoff + `21.6 us` tx) |
+| `State` (`TC1`, `eth[0]`) | 85.6 us (`1070 B` tagged) | 9.408 ms (buffer overflow drops above `95 Mbps`) | 117.6 us lower-priority block + `DDS` burst (`4 * 21.6 = 86.4 us`) | 971.2 us (`885.6 us` max wait after `414.4 us` cutoff + `85.6 us` tx) |
+| `Telemetry` (`TC0`, `eth[0]`) | 117.6 us (`1470 B` tagged) | 9.408 ms | Preempted between frames by `TC1` and `TC2` | Throttled to 4 frames/cycle (`44.8 Mbps` payload ceiling) |
+
