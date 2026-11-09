@@ -378,9 +378,10 @@ def append_manifest_row(manifest_path: Path, row: Dict[str, object]) -> None:
 def default_runner(spec: RunSpec, out_dir: Path, log_path: Path, sim_time_limit: Optional[str] = None) -> Tuple[int, int]:
     """Run one OMNeT++ simulation and return (exit_code, max_rss_kb)."""
     time_override = f"'--sim-time-limit={sim_time_limit}' '--**.simTimeLimit={sim_time_limit}'" if sim_time_limit else ""
+    time_prefix = "/usr/bin/time -f 'MAX_RSS_KB=%M' " if Path("/usr/bin/time").exists() else ""
     cmd = (
         f"source {OMNETPP_ENV} && export INET_ROOT={INET_ROOT} && cd {SIM_DIR} && "
-        f"/usr/bin/time -f 'MAX_RSS_KB=%M' "
+        f"{time_prefix}"
         f"opp_run -n $INET_ROOT/src:../src:. -l $INET_ROOT/src/INET -l {MATRIXFACTORY_LIB} "
         f"-u Cmdenv -c {spec.config_name} -r {spec.run_number} omnetpp.ini "
         f"'--result-dir={out_dir.resolve()}' {time_override}"
@@ -397,6 +398,9 @@ def default_runner(spec: RunSpec, out_dir: Path, log_path: Path, sim_time_limit:
                 max_rss = int(line.split("=", 1)[1].strip())
             except ValueError:
                 pass
+    if max_rss == 0:
+        import resource
+        max_rss = int(resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss)
     if "<!> Error" in combined or "cRuntimeError" in combined:
         return (res.returncode or 1), max_rss
     return res.returncode, max_rss

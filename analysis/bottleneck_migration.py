@@ -9,6 +9,11 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import sys
+
+# Avoid loading optional NumPy 1.x C-extensions (numexpr, bottleneck) when running under NumPy 2.x
+sys.modules.setdefault("numexpr", None)
+sys.modules.setdefault("bottleneck", None)
 
 import numpy as np
 import pandas as pd
