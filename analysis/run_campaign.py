@@ -27,6 +27,7 @@ import os
 import re
 import shutil
 import socket
+import threading
 import subprocess
 import sys
 import time
@@ -308,10 +309,16 @@ def validate_sca_file(sca_path: Path, spec: Optional[RunSpec] = None) -> None:
                 f"{path.name} ({cls}): coordinator conservation violated: "
                 f"{gen} != {deliv} + {dq} + {dr} + {do} + {lt}"
             )
+        sinks = ex.class_sink_modules(scalars, cls)
+        if not sinks:
+            raise RuntimeError(f"{path.name}: no DeadlineSink found for class {cls}")
         for domain_stat in ex.DOMAIN_STATS.values():
-            has_stat = any(sname == domain_stat and "count" in val and "mean" in val for (_, sname), val in stats.items())
-            if not has_stat:
-                raise RuntimeError(f"{path.name} ({cls}): missing domain statistic {domain_stat}")
+            missing = [m for m in sinks if "count" not in stats.get((m, domain_stat), {})
+                       or "mean" not in stats.get((m, domain_stat), {})]
+            if missing:
+                raise RuntimeError(
+                    f"{path.name} ({cls}): domain statistic {domain_stat} missing on {len(missing)} of "
+                    f"{len(sinks)} sink(s), e.g. {missing[0]}")
 
 
 def cleanup_auxiliary_files(out_dir: Path, spec: RunSpec) -> None:
@@ -352,15 +359,20 @@ def find_existing_valid_output(out_dir: Path, spec: RunSpec) -> Optional[Path]:
     return None
 
 
+_MANIFEST_LOCK = threading.Lock()
+
+
 def append_manifest_row(manifest_path: Path, row: Dict[str, object]) -> None:
+    """Append one row; serialized so concurrent workers cannot write a second header or interleave rows."""
     manifest_path = Path(manifest_path)
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    write_header = not manifest_path.exists() or manifest_path.stat().st_size == 0
-    with open(manifest_path, "a", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=MANIFEST_COLUMNS)
-        if write_header:
-            writer.writeheader()
-        writer.writerow({k: row[k] for k in MANIFEST_COLUMNS})
+    with _MANIFEST_LOCK:
+        write_header = not manifest_path.exists() or manifest_path.stat().st_size == 0
+        with open(manifest_path, "a", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=MANIFEST_COLUMNS)
+            if write_header:
+                writer.writeheader()
+            writer.writerow({k: row[k] for k in MANIFEST_COLUMNS})
 
 
 def default_runner(spec: RunSpec, out_dir: Path, log_path: Path, sim_time_limit: Optional[str] = None) -> Tuple[int, int]:
@@ -496,6 +508,27 @@ def execute_run_with_retry(
     )
 
 
+def run_slice_parallel(
+    slice_specs: Sequence[RunSpec],
+    workers: int,
+    run_one: Callable[[RunSpec], Dict[str, object]],
+) -> List[Dict[str, object]]:
+    """Run one slice on a thread pool. On the first failure, drop every queued run, let the runs already
+    in flight finish (so the manifest stays consistent), then re-raise. Leaving the pool via ``with``
+    would instead run the whole remaining slice (up to 131 runs) before the error surfaced."""
+    results: List[Dict[str, object]] = []
+    pool = ThreadPoolExecutor(max_workers=int(workers))
+    try:
+        futs = [pool.submit(run_one, spec) for spec in slice_specs]
+        for fut in as_completed(futs):
+            results.append(fut.result())
+    except BaseException:
+        pool.shutdown(wait=True, cancel_futures=True)
+        raise
+    pool.shutdown(wait=True)
+    return results
+
+
 def parse_shard_arg(shard_str: Optional[str]) -> Optional[Tuple[int, int]]:
     if not shard_str:
         return None
@@ -595,27 +628,25 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
         for s_idx, sk in enumerate(slices_in_order, 1):
             slice_specs = [s for s in scheduled if s.slice_key == sk]
-            with ThreadPoolExecutor(max_workers=int(args.workers)) as pool:
-                futs = {
-                    pool.submit(
-                        execute_run_with_retry,
-                        spec,
-                        out_dir=out_dir,
-                        manifest_path=manifest_path,
-                        log_dir=log_dir,
-                        lib_sha256=lib_sha,
-                        compress=not args.no_gzip,
-                        min_free_gb=args.min_free_gb,
-                        sim_time_limit=args.sim_time_limit,
-                    ): spec
-                    for spec in slice_specs
-                }
-                for fut in as_completed(futs):
-                    res = fut.result()
-                    if res["status"] == "skipped":
-                        skipped += 1
-                    else:
-                        completed += 1
+            slice_results = run_slice_parallel(
+                slice_specs,
+                int(args.workers),
+                lambda spec: execute_run_with_retry(
+                    spec,
+                    out_dir=out_dir,
+                    manifest_path=manifest_path,
+                    log_dir=log_dir,
+                    lib_sha256=lib_sha,
+                    compress=not args.no_gzip,
+                    min_free_gb=args.min_free_gb,
+                    sim_time_limit=args.sim_time_limit,
+                ),
+            )
+            for res in slice_results:
+                if res["status"] == "skipped":
+                    skipped += 1
+                else:
+                    completed += 1
             LOG.info("Completed slice %d/%d %s (completed=%d, skipped=%d)", s_idx, len(slices_in_order), sk, completed, skipped)
 
     LOG.info("Campaign pass finished cleanly: completed=%d, skipped=%d", completed, skipped)

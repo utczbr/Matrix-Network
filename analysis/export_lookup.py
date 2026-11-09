@@ -291,6 +291,15 @@ def weighted_mean(parts: Sequence[Tuple[float, float]]) -> float:
     return sum(count * mean for count, mean in parts if count > 0) / total
 
 
+def class_sink_modules(scalars: Dict[Tuple[str, str], float], cls: str) -> List[str]:
+    """DeadlineSink modules of one traffic class in a run (Orders has one per AMR)."""
+    return sorted(mod for (mod, sname) in scalars if sname == "n_valid_delivered" and (
+        (cls == "orders" and ".amr[" in mod and ".app[1].sink" in mod) or
+        (cls == "state" and mod.endswith(".fms.app[0].sink")) or
+        (cls == "telemetry" and mod.endswith(".fms.app[1].sink")) or
+        (cls == "dds" and mod.endswith(".fms.app[2].sink"))))
+
+
 def _run_key(attrs: Dict[str, str], sca_path: Path):
     """(cell, N_AMR, lambda, PHY, repetition) of one run, as in ``build_tables_from_sca``."""
     cell_match = re.search(r"Cell(\d)", attrs.get("configname", ""))
@@ -325,11 +334,7 @@ def build_domain_delay_table(sca_dir: Path, tolerance_ms: float = 1e-6) -> pd.Da
         cell, n_amr, lam, phy, rep = key
         stats = parse_sca_statistics(sca_path)
         for cls in ("orders", "dds", "state", "telemetry"):
-            sink_mods = sorted(mod for (mod, sname) in scalars if sname == "n_valid_delivered" and (
-                (cls == "orders" and ".amr[" in mod and ".app[1].sink" in mod) or
-                (cls == "state" and mod.endswith(".fms.app[0].sink")) or
-                (cls == "telemetry" and mod.endswith(".fms.app[1].sink")) or
-                (cls == "dds" and mod.endswith(".fms.app[2].sink"))))
+            sink_mods = class_sink_modules(scalars, cls)
             if not sink_mods:
                 raise RuntimeError(f"{sca_path.name}: no DeadlineSink found for class {cls}")
             n_domain = int(sum(scalars[(m, "n_domain_breakdown_valid")] for m in sink_mods))
@@ -680,8 +685,9 @@ def sample_delay(delays_ms: Sequence[float], p_loss: float, *,
                  n_draws: int = 1) -> np.ndarray:
     """Three-step stochastic inverse-transform lookup sampler (SPEC-lookup-ner-integration.md section 2.2).
 
-    Draws independent u_loss ~ U(0, 1) and u_lat ~ U(0, 1) from ``rng``.
-    Returns an array of transport delays in ms, with ``np.inf`` where u_loss < p_loss.
+    Draws independent u_loss ~ U(0, 1) and u_lat ~ U(0, 1) from ``rng`` for each message, as a pair, so
+    message i always receives the same pair whether messages are drawn in one batch or one at a time
+    (the twin draws at send time). Returns delays in ms, with ``np.inf`` where u_loss < p_loss.
     """
     if not (0.0 <= float(p_loss) <= 1.0):
         raise ValueError(f"p_loss must be in [0, 1], got {p_loss}")
@@ -689,8 +695,8 @@ def sample_delay(delays_ms: Sequence[float], p_loss: float, *,
     d = np.asarray(delays_ms, dtype=np.float64)
     if int(n_draws) < 1:
         raise ValueError("n_draws must be >= 1")
-    u_loss = rng.random(int(n_draws))
-    u_lat = rng.random(int(n_draws))
+    u = rng.random((int(n_draws), 2))  # row i = (u_loss, u_lat) of message i
+    u_loss, u_lat = u[:, 0], u[:, 1]
     dropped = u_loss < float(p_loss)
     if np.all(dropped):
         return np.full(int(n_draws), np.inf, dtype=np.float64)
@@ -724,11 +730,25 @@ def sample_flow_ner(g_s: Sequence[float], delays_ms: Sequence[float], p_loss: fl
     }
 
 
+def dkw_epsilon(n_samples: int, alpha: float) -> float:
+    """Dvoretzky-Kiefer-Wolfowitz half-width at two-sided level ``alpha``, plus the 1/n discretization slack."""
+    return math.sqrt(math.log(2.0 / alpha) / (2.0 * n_samples)) + 1.0 / n_samples
+
+
 def verify_g8a(summary: pd.DataFrame, ecdf: pd.DataFrame, *,
                require_full_grid: bool = True,
                mc_draws: int = 100_000,
-               seed: int = 20261109) -> Dict[str, object]:
-    """Execute the standalone Phase 8 (G8a) lookup-table and twin-ingestion verification suite."""
+               seed: int = 20261109,
+               mc_family_alpha: float = 0.01) -> Dict[str, object]:
+    """Execute the standalone Phase 8 (G8a) lookup-table and twin-ingestion verification suite.
+
+    The Monte Carlo checks run once per key, so their error level is controlled across the whole table:
+    each key is tested at ``mc_family_alpha / len(summary)``. A per-key 1% level false-fails about 3 keys
+    in 1,920 on a correct table.
+    """
+    from scipy.stats import norm
+    alpha_key = float(mc_family_alpha) / max(len(summary), 1)
+    z_loss = float(norm.isf(alpha_key / 2.0))
     # 1. Schema and tail flags
     if list(summary.columns) != SUMMARY_COLUMNS:
         raise RuntimeError(f"G8a.1 schema mismatch in summary: {list(summary.columns)}")
@@ -816,19 +836,19 @@ def verify_g8a(summary: pd.DataFrame, ecdf: pd.DataFrame, *,
             draws = sample_delay(delays, p_loss, rng=rng_mc, n_draws=mc_draws)
             lost_mask = ~np.isfinite(draws)
             emp_loss = float(np.mean(lost_mask))
-            # 99.99% normal/Exact binomial tolerance around p_loss
-            loss_tol = 4.5 * math.sqrt(max(p_loss * (1.0 - p_loss), 1.0 / mc_draws) / mc_draws) + (2.0 / mc_draws)
+            # family-wise normal tolerance around p_loss (z set from alpha_key)
+            loss_tol = z_loss * math.sqrt(max(p_loss * (1.0 - p_loss), 1.0 / mc_draws) / mc_draws) + (2.0 / mc_draws)
             if abs(emp_loss - p_loss) > loss_tol:
                 raise RuntimeError(f"G8a.7 MC loss {emp_loss:.5f} outside tolerance of {p_loss:.5f} at {key_tuple}")
             deliv_draws = np.sort(draws[~lost_mask])
             if deliv_draws.size >= 100:
-                eps_dkw = math.sqrt(math.log(2.0 / 0.01) / (2.0 * deliv_draws.size)) + (1.0 / deliv_draws.size)
+                eps_dkw = dkw_epsilon(deliv_draws.size, alpha_key)
                 # Right-continuous and left-continuous empirical CDF at each knot delay
                 cdf_hi = np.searchsorted(deliv_draws, delays, side="right") / deliv_draws.size
                 cdf_lo = np.searchsorted(deliv_draws, delays, side="left") / deliv_draws.size
                 levels_arr = np.asarray(dm.QUANTILE_LEVELS, dtype=np.float64)
                 if np.any(levels_arr < cdf_lo - eps_dkw) or np.any(levels_arr > cdf_hi + eps_dkw):
-                    raise RuntimeError(f"G8a.7 MC quantile draws violated 99% DKW bound ({eps_dkw:.5f}) at {key_tuple}")
+                    raise RuntimeError(f"G8a.7 MC quantile draws violated the family-wise DKW bound ({eps_dkw:.5f}) at {key_tuple}")
 
     high_mean = float(np.mean(high_errs)) if high_errs else 0.0
     high_max = float(np.max(high_errs)) if high_errs else 0.0

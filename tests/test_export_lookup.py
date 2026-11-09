@@ -290,3 +290,20 @@ def test_verify_g8a_passes_on_valid_tables_and_catches_mutations(tables):
         ex.verify_g8a(bad_summary, ecdf, require_full_grid=False, mc_draws=0)
 
 
+
+
+# ---------------------------------------------------------------- review fixes (rev 6)
+def test_sample_delay_gives_the_same_messages_in_one_batch_or_one_at_a_time():
+    levels = np.asarray(dm.QUANTILE_LEVELS)
+    delays = np.linspace(1.0, 50.0, len(levels))
+    batch = ex.sample_delay(delays, 0.2, rng=ex.flow_rng(7, "amr[0]->fms"), n_draws=40)
+    rng = ex.flow_rng(7, "amr[0]->fms")
+    one_by_one = np.concatenate([ex.sample_delay(delays, 0.2, rng=rng, n_draws=1) for _ in range(40)])
+    assert np.array_equal(batch, one_by_one)
+
+
+def test_dkw_epsilon_widens_when_the_error_level_is_spread_over_many_keys():
+    per_key = ex.dkw_epsilon(100_000, 0.01)
+    family_wise = ex.dkw_epsilon(100_000, 0.01 / 1920)
+    assert per_key == pytest.approx(0.00516, abs=2e-5)
+    assert family_wise == pytest.approx(0.00803, abs=2e-5)

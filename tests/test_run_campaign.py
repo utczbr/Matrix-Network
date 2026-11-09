@@ -217,3 +217,79 @@ def test_truncated_sca_is_rejected_retried_with_same_run_number_and_stops_after_
             spec_bad, out_dir=out_dir, manifest_path=manifest, log_dir=logs, lib_sha256="abc", runner=failing_runner
         )
     assert bad_attempts == [8, 8]
+
+
+# ---------------------------------------------------------------- review fixes (rev 6)
+def _specs(n):
+    return [rc.RunSpec(cell=1, run_number=i, n_amr=5, phy_rate_mbps=54, tel_interval="2000us", rep=i) for i in range(n)]
+
+
+def test_slice_halt_cancels_queued_runs_after_the_first_failure():
+    import threading
+    import time
+    started, lock = [], threading.Lock()
+
+    def run_one(spec):
+        with lock:
+            started.append(spec.run_number)
+        if spec.run_number == 0:
+            raise RuntimeError("failed twice")
+        time.sleep(0.05)
+        return {"status": "completed"}
+
+    with pytest.raises(RuntimeError, match="failed twice"):
+        rc.run_slice_parallel(_specs(60), 4, run_one)
+    # Only runs already in flight may finish; before the fix all 60 ran.
+    assert len(started) <= 8, f"{len(started)} runs started after a failure"
+
+
+def test_slice_runs_everything_and_returns_results_when_nothing_fails():
+    results = rc.run_slice_parallel(_specs(12), 3, lambda s: {"status": "completed", "n": s.run_number})
+    assert sorted(r["n"] for r in results) == list(range(12))
+
+
+def test_manifest_has_a_single_header_and_every_row_under_concurrent_appends(tmp_path, monkeypatch):
+    import threading
+    import time
+    # Widen the window between "file is empty, so write the header" and the header actually landing on
+    # disk. Without the lock, every thread that checks during that window writes its own header.
+    original = rc.csv.DictWriter.writeheader
+
+    def slow_writeheader(self):
+        time.sleep(0.05)
+        return original(self)
+
+    monkeypatch.setattr(rc.csv.DictWriter, "writeheader", slow_writeheader)
+    path = tmp_path / "manifest.csv"
+    row = {k: 1 for k in rc.MANIFEST_COLUMNS}
+    barrier = threading.Barrier(8)
+
+    def work():
+        barrier.wait()
+        rc.append_manifest_row(path, row)
+
+    threads = [threading.Thread(target=work) for _ in range(8)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+    lines = path.read_text().strip().splitlines()
+    assert lines.count(",".join(rc.MANIFEST_COLUMNS)) == 1 and len(lines) == 9
+
+
+def test_validate_rejects_a_sink_missing_a_domain_statistic_even_if_another_sink_has_it(tmp_path):
+    spec = rc.RunSpec(cell=2, run_number=3, n_amr=10, phy_rate_mbps=54, tel_interval="2000us", rep=0)
+    path = tmp_path / "run.sca"
+    write_valid_sca(path, spec)
+    text = path.read_text().splitlines()
+    # Remove the wireless statistic block of the DDS sink only; Orders/State/Telemetry sinks still carry it.
+    out, skip = [], False
+    for line in text:
+        if line.startswith("statistic ") and SINKS["dds"] in line and "wirelessDomainDelay_ms" in line:
+            skip = True
+            continue
+        if skip and (line.startswith("field ") or line.startswith("bin") or line.startswith("attr ")):
+            continue
+        skip = False
+        out.append(line)
+    path.write_text("\n".join(out) + "\n")
+    with pytest.raises(RuntimeError, match="wirelessDomainDelay_ms missing on 1 of 1"):
+        rc.validate_sca_file(path, spec)

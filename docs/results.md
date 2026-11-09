@@ -39,7 +39,7 @@ horizon (`HEAD = 7e1355ba7d`). N=40/54 Mbps recorded 12,100 wireless transmissio
 retries, and 20.238 ms maximum State delay (`Orders` p50 7.958 ms, max 17.230 ms, 29,751 valid packets conserved). N=80/12 Mbps resolved to 850 µs
 State slots, 560 µs Orders slots, 39 AP slots, and a 90 ms superframe; it
 recorded 23,968 wireless transmissions (up from 23,966 after commit `8a66438ed0` merged contiguous AP slots, allowing one additional `Orders` DATA+ACK exchange—4,026 vs. 4,025—to finish before 10 s), zero retries or retry-limit drops,
-90.876 ms maximum State delay (44.96% Definition-A and 39.45% Definition-B misses at 50 ms on 7,923 valid State packets; `Orders` p50 49.870 ms, max 152.786 ms, 49.84% Definition-A and 42.85% Definition-B misses at 50 ms, 7.82% and 6.04% at 100 ms on 3,991 valid Orders packets), and exact conservation of 35,628 valid packets.
+90.876 ms maximum State delay (44.96% Definition-A and 39.45% Definition-B misses at 50 ms on 7,923 valid State packets; `Orders` p50 49.870 ms, max 152.786 ms, 49.84% Definition-A and 42.85% Definition-B misses at 50 ms, 7.82% and 6.04% at 100 ms on 3,991 valid Orders packets; these Orders figures come from a 10 s run with `warmup-period = 0 s`, so they include the sources' startup transient (`initialProductionOffset = uniform(0s, 200ms)` doubles the arrival rate at the start) and are not steady-state values), and exact conservation of 35,628 valid packets.
 The matched N=40/54 Mbps CSMA control recorded 8 retries. These runs are
 acceptance and integration evidence only; they are not pilot or production
 results.
