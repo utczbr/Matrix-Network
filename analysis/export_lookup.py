@@ -1,23 +1,28 @@
 """Lookup-table export for the digital twin's NER engine (decisions.md section 5, Q3).
 
 Supports TWO ingestion modes:
-1. Stage 1 (--packets): Per-packet CSV table (used by the 51-test unit suite and pilot debug runs).
+1. Stage 1 (--packets): Per-packet CSV table (used by the unit test suite and pilot debug runs).
 2. Stage 2 (--sca-dir): Campaign-scale OMNeT++ .sca files produced by
    DeadlineSink and ExperimentCoordinator across Cell1_Sweep..Cell6_Sweep,
    enforcing the strict Packet Conservation Audit Gate.
 
 Also provides ``interpolate`` (quantile-space monotone PCHIP along N_AMR and
 lambda_tel, non-crossing guard, delays >= 0, saturation nearest-neighbour clamp,
-no extrapolation with a logged warning; decisions.md section 5.4).
+no extrapolation with a logged warning; decisions.md section 5.4), the reference
+inverse-transform sampler ``sample_delay`` / ``sample_flow_ner`` (SPEC-lookup-ner-integration.md
+section 2.2), and the standalone G8a verification harness ``verify_g8a``.
 """
 from __future__ import annotations
 
 import argparse
 import glob
+import gzip
 import logging
+import math
 import re
+import zlib
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -38,6 +43,11 @@ FIFO_CELLS = (1, 2)
 TAS_CELLS = (5, 6)
 FIFO_SATURATION_MBPS = 100.0       # decisions.md section 5.4 item 4
 TAS_TELEMETRY_SATURATION_MBPS = 44.8
+
+LOCKED_GRID_CELLS = (1, 2, 3, 4, 5, 6)
+LOCKED_GRID_NAMRS = (5, 10, 20, 40, 80)
+LOCKED_GRID_PHYS = (12, 54)
+LOCKED_GRID_TELS = ("2000us", "996us", "747us", "600us", "527us", "472us", "407us", "300us")
 
 # Map OMNeT++ telInterval parameter string -> aggregate payload Mbps across 4 stations
 TEL_INTERVAL_TO_MBPS: Dict[str, float] = {
@@ -183,7 +193,8 @@ def parse_sca_file(sca_path: Path) -> Tuple[Dict[str, str], Dict[Tuple[str, str]
     """Parse itervar/param headers and scalar (module, name) -> value from an OMNeT++ .sca file."""
     attrs: Dict[str, str] = {}
     scalars: Dict[Tuple[str, str], float] = {}
-    with open(sca_path, "r", encoding="utf-8", errors="replace") as f:
+    opener = gzip.open if str(sca_path).endswith(".gz") else open
+    with opener(sca_path, "rt", encoding="utf-8", errors="replace") as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -204,6 +215,157 @@ def parse_sca_file(sca_path: Path) -> Tuple[Dict[str, str], Dict[Tuple[str, str]
     return attrs, scalars
 
 
+def check_repetition_floor(df_runs: pd.DataFrame, expected_reps: Optional[int]) -> None:
+    """Contiguous-floor repetition gate (replaces the exact ``reps == range(R)`` equality).
+
+    Every key must carry seeds ``0..k-1`` with no gaps and ``k >= expected_reps``, and all six
+    cells of an (class, N, lambda, PHY) slice must share the same ``k`` so the six-cell pairing
+    used by ``bottleneck_migration.py`` stays balanced after a slice top-up. Duplicates are
+    rejected separately by the caller.
+    """
+    if expected_reps is None:
+        return
+    k_by_key = {}
+    for key, grp in df_runs.groupby(KEY, sort=True):
+        reps = sorted({int(value) for value in grp["rep"]})
+        k = len(reps)
+        if reps != list(range(k)):
+            raise RuntimeError(f"{key}: repetitions must be contiguous from 0 with no gaps, found {reps}")
+        if k < expected_reps:
+            raise RuntimeError(
+                f"{key}: expected repetitions 0..{expected_reps - 1} at least, found only {k}")
+        k_by_key[key] = k
+    slices = {}
+    for (cell, cls, n_amr, lam, phy), k in k_by_key.items():
+        slices.setdefault((cls, n_amr, lam, phy), {})[cell] = k
+    for slice_key, by_cell in sorted(slices.items()):
+        if len(set(by_cell.values())) != 1:
+            raise RuntimeError(
+                f"slice {slice_key}: cells have unequal repetition counts {dict(sorted(by_cell.items()))}")
+
+
+# --------------------------------------------------------------------------- domain-delay statistics
+# DeadlineSink records these as OMNeT++ ``statistic`` blocks (count, mean, ..., histogram bins), not
+# scalars, so the scalar parser never sees them. Read count and mean only; bins are ignored, so the
+# result is identical whether bin recording is on or off.
+DOMAIN_STATS = {
+    "wireless": "wirelessDomainDelay_ms",
+    "wired_switch": "wiredSwitchDelay_ms",
+    "wire_serialization": "wireSerializationAndPropDelay_ms",
+}
+E2E_STAT = "e2eDelay_ms"
+_STAT_FIELDS = ("count", "mean", "stddev")
+
+
+def parse_sca_statistics(sca_path: Path) -> Dict[Tuple[str, str], Dict[str, float]]:
+    """Parse ``statistic`` blocks into ``(module, name) -> {count, mean, stddev}``; bins are ignored."""
+    stats: Dict[Tuple[str, str], Dict[str, float]] = {}
+    current: Optional[Dict[str, float]] = None
+    opener = gzip.open if str(sca_path).endswith(".gz") else open
+    with opener(sca_path, "rt", encoding="utf-8", errors="replace") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            if line.startswith("statistic "):
+                parts = line.split()
+                if len(parts) < 3:
+                    raise RuntimeError(f"{Path(sca_path).name}: malformed statistic line {line!r}")
+                current = stats.setdefault((parts[1], parts[2].strip('"')), {})
+            elif current is not None and line.startswith("field "):
+                parts = line.split()
+                if len(parts) == 3 and parts[1] in _STAT_FIELDS:
+                    current[parts[1]] = float(parts[2])
+            elif current is not None and line.startswith(("bin", "attr ")):
+                continue
+            else:
+                current = None
+    return stats
+
+
+def weighted_mean(parts: Sequence[Tuple[float, float]]) -> float:
+    """Count-weighted mean of ``(count, mean)`` pairs; empty sinks (count 0) are skipped."""
+    total = sum(count for count, _ in parts)
+    if total <= 0:
+        return float("nan")
+    return sum(count * mean for count, mean in parts if count > 0) / total
+
+
+def _run_key(attrs: Dict[str, str], sca_path: Path):
+    """(cell, N_AMR, lambda, PHY, repetition) of one run, as in ``build_tables_from_sca``."""
+    cell_match = re.search(r"Cell(\d)", attrs.get("configname", ""))
+    if not cell_match:
+        return None
+    tel_str = attrs.get("telInterval", "2000us").strip('"')
+    if tel_str not in TEL_INTERVAL_TO_MBPS:
+        raise RuntimeError(f"{sca_path.name}: unmapped telInterval {tel_str!r}")
+    phy = int(float(attrs.get("phyRate", "54Mbps").replace("Mbps", "").strip('"')))
+    return (int(cell_match.group(1)), int(attrs.get("nAmr", attrs.get("*.numAmrs", 10))),
+            TEL_INTERVAL_TO_MBPS[tel_str], phy, int(attrs.get("repetition", 0)))
+
+
+def build_domain_delay_table(sca_dir: Path, tolerance_ms: float = 1e-6) -> pd.DataFrame:
+    """Per-run, per-class, per-domain delivered-packet delay means from ``statistic`` blocks.
+
+    Columns: cell, class, N_AMR, lambda_tel_Mbps, phy_rate_Mbps, rep, domain, n_samples, mean_ms,
+    e2e_mean_ms. Counts are pooled over a class's sinks (Orders has one per AMR) and means are
+    count-weighted. Audits: every sink must carry every statistic; the statistic count must equal
+    ``n_domain_breakdown_valid``; and the three domain means must sum to the end-to-end mean
+    (checked whenever the end-to-end statistic covers the same population).
+    """
+    sca_files = sorted([*Path(sca_dir).glob("*.sca"), *Path(sca_dir).glob("*.sca.gz")])
+    if not sca_files:
+        raise FileNotFoundError(f"No .sca files found in {sca_dir}")
+    records = []
+    for sca_path in sca_files:
+        attrs, scalars = parse_sca_file(sca_path)
+        key = _run_key(attrs, sca_path)
+        if key is None:
+            continue
+        cell, n_amr, lam, phy, rep = key
+        stats = parse_sca_statistics(sca_path)
+        for cls in ("orders", "dds", "state", "telemetry"):
+            sink_mods = sorted(mod for (mod, sname) in scalars if sname == "n_valid_delivered" and (
+                (cls == "orders" and ".amr[" in mod and ".app[1].sink" in mod) or
+                (cls == "state" and mod.endswith(".fms.app[0].sink")) or
+                (cls == "telemetry" and mod.endswith(".fms.app[1].sink")) or
+                (cls == "dds" and mod.endswith(".fms.app[2].sink"))))
+            if not sink_mods:
+                raise RuntimeError(f"{sca_path.name}: no DeadlineSink found for class {cls}")
+            n_domain = int(sum(scalars[(m, "n_domain_breakdown_valid")] for m in sink_mods))
+            means, counts = {}, {}
+            for domain, stat in DOMAIN_STATS.items():
+                missing = [m for m in sink_mods if "count" not in stats.get((m, stat), {})
+                           or "mean" not in stats.get((m, stat), {})]
+                if missing:
+                    raise RuntimeError(
+                        f"{sca_path.name}: missing statistic {stat} on {len(missing)} {cls} sink(s), e.g. {missing[0]}")
+                parts = [(stats[(m, stat)]["count"], stats[(m, stat)]["mean"]) for m in sink_mods]
+                counts[domain] = int(sum(count for count, _ in parts))
+                if counts[domain] != n_domain:
+                    raise RuntimeError(
+                        f"{sca_path.name} ({cls}): {stat} count {counts[domain]} != "
+                        f"n_domain_breakdown_valid {n_domain}")
+                means[domain] = weighted_mean(parts)
+            e2e_mean = float("nan")
+            e2e_parts = [(stats.get((m, E2E_STAT), {}).get("count"), stats.get((m, E2E_STAT), {}).get("mean"))
+                         for m in sink_mods]
+            if all(c is not None and mu is not None for c, mu in e2e_parts) \
+                    and int(sum(c for c, _ in e2e_parts)) == n_domain:
+                e2e_mean = weighted_mean(e2e_parts)
+                if n_domain > 0 and abs(sum(means.values()) - e2e_mean) > tolerance_ms:
+                    raise RuntimeError(
+                        f"{sca_path.name} ({cls}): domain means sum to {sum(means.values()):.9f} ms "
+                        f"but the end-to-end mean is {e2e_mean:.9f} ms")
+            for domain in DOMAIN_STATS:
+                records.append({"cell": cell, "class": cls, "N_AMR": n_amr, "lambda_tel_Mbps": lam,
+                                "phy_rate_Mbps": phy, "rep": rep, "domain": domain,
+                                "n_samples": counts[domain], "mean_ms": means[domain],
+                                "e2e_mean_ms": e2e_mean})
+    return pd.DataFrame(records).sort_values(
+        ["cell", "class", "N_AMR", "lambda_tel_Mbps", "phy_rate_Mbps", "rep", "domain"]).reset_index(drop=True)
+
+
 def build_tables_from_sca(sca_dir: Path, strict_conservation: bool = True,
                           expected_reps: Optional[int] = None,
                           require_full_grid: bool = False) -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -213,7 +375,7 @@ def build_tables_from_sca(sca_dir: Path, strict_conservation: bool = True,
     generated/drop/termination accounting and pooled per-class quantiles; the
     sinks own delivered deadline misses. Both sides must agree exactly.
     """
-    sca_files = sorted(Path(sca_dir).glob("*.sca"))
+    sca_files = sorted([*Path(sca_dir).glob("*.sca"), *Path(sca_dir).glob("*.sca.gz")])
     if not sca_files:
         raise FileNotFoundError(f"No .sca files found in {sca_dir}")
 
@@ -341,6 +503,8 @@ def build_tables_from_sca(sca_dir: Path, strict_conservation: bool = True,
         if missing or extra:
             raise RuntimeError(f"campaign grid mismatch: {len(missing)} missing, {len(extra)} unexpected; sample={list(missing)[:3]}")
 
+    check_repetition_floor(df_runs, expected_reps)
+
     summary_rows, ecdf_rows = [], []
     idx = {lvl: i for i, lvl in enumerate(levels)}
 
@@ -349,8 +513,6 @@ def build_tables_from_sca(sca_dir: Path, strict_conservation: bool = True,
         nominal = dm.NOMINAL_D_MS[cls]
         reps = set(int(value) for value in grp["rep"])
         n_reps = len(reps)
-        if expected_reps is not None and reps != set(range(expected_reps)):
-            raise RuntimeError(f"{key}: expected repetitions 0..{expected_reps - 1}, found {sorted(reps)}")
 
         n_deliv_total = int(grp["n_deliv"].sum())
         n_drop_q = int(grp["n_drop_queue"].sum())
@@ -505,6 +667,208 @@ def _pchip(x, y, xq: float, axis: int):
     return PchipInterpolator(np.asarray(x, dtype=float), y, axis=axis, extrapolate=False)(xq)
 
 
+# --------------------------------------------------------------------------- reference sampler & G8a harness
+def flow_rng(run_seed: int, flow_id: str) -> np.random.Generator:
+    """Deterministic per-flow PRNG stream isolated by (run_seed, flow_id) (SPEC section 2.1)."""
+    flow_hash = zlib.crc32(str(flow_id).encode("utf-8")) & 0xFFFFFFFF
+    return np.random.default_rng(np.random.SeedSequence([int(run_seed) & 0xFFFFFFFF, int(flow_hash)]))
+
+
+def sample_delay(delays_ms: Sequence[float], p_loss: float, *,
+                 rng: np.random.Generator,
+                 levels: Sequence[float] = dm.QUANTILE_LEVELS,
+                 n_draws: int = 1) -> np.ndarray:
+    """Three-step stochastic inverse-transform lookup sampler (SPEC-lookup-ner-integration.md section 2.2).
+
+    Draws independent u_loss ~ U(0, 1) and u_lat ~ U(0, 1) from ``rng``.
+    Returns an array of transport delays in ms, with ``np.inf`` where u_loss < p_loss.
+    """
+    if not (0.0 <= float(p_loss) <= 1.0):
+        raise ValueError(f"p_loss must be in [0, 1], got {p_loss}")
+    q = np.asarray(levels, dtype=np.float64)
+    d = np.asarray(delays_ms, dtype=np.float64)
+    if int(n_draws) < 1:
+        raise ValueError("n_draws must be >= 1")
+    u_loss = rng.random(int(n_draws))
+    u_lat = rng.random(int(n_draws))
+    dropped = u_loss < float(p_loss)
+    if np.all(dropped):
+        return np.full(int(n_draws), np.inf, dtype=np.float64)
+    if q.shape != d.shape or q.ndim != 1 or q.size == 0:
+        raise ValueError("levels and delays_ms must be 1-D arrays of equal non-zero length")
+    if np.any(np.diff(q) <= 0) or np.any(np.diff(d) < 0):
+        raise ValueError("levels must be strictly increasing and delays_ms non-decreasing")
+    tau_ms = np.interp(u_lat, q, d)
+    return np.where(dropped, np.inf, tau_ms)
+
+
+def sample_flow_ner(g_s: Sequence[float], delays_ms: Sequence[float], p_loss: float, *,
+                    run_seed: int, flow_id: str, lead_ms: float,
+                    tick_ms: float = dm.T_PRIMARY_MS, phase_ms: float = 0.0,
+                    levels: Sequence[float] = dm.QUANTILE_LEVELS) -> Dict[str, np.ndarray]:
+    """Deterministic seeded replay of a message flow through the NER tick grid (SPEC section 2.1-2.2)."""
+    g = np.asarray(g_s, dtype=np.float64)
+    rng = flow_rng(run_seed, flow_id)
+    tau_ms = sample_delay(delays_ms, p_loss, rng=rng, levels=levels, n_draws=g.size)
+    dropped = ~np.isfinite(tau_ms)
+    a_s = np.where(dropped, np.inf, g + tau_ms / 1000.0)
+    c_ps = dm.consumption_instant_ps(dm.to_ps(g), dm._ps(lead_ms), dm._ps(tick_ms), dm._ps(phase_ms))
+    c_s = c_ps.astype(np.float64) / dm.PS_PER_S
+    return {
+        "dropped": dropped,
+        "delay_ms": tau_ms,
+        "a_s": a_s,
+        "c_s": c_s,
+        "miss_B": dm.miss_b(g, a_s, lead_ms=lead_ms, tick_ms=tick_ms, phase_ms=phase_ms),
+        "staleness_ticks": dm.staleness_ticks(g, a_s, lead_ms=lead_ms, tick_ms=tick_ms, phase_ms=phase_ms),
+    }
+
+
+def verify_g8a(summary: pd.DataFrame, ecdf: pd.DataFrame, *,
+               require_full_grid: bool = True,
+               mc_draws: int = 100_000,
+               seed: int = 20261109) -> Dict[str, object]:
+    """Execute the standalone Phase 8 (G8a) lookup-table and twin-ingestion verification suite."""
+    # 1. Schema and tail flags
+    if list(summary.columns) != SUMMARY_COLUMNS:
+        raise RuntimeError(f"G8a.1 schema mismatch in summary: {list(summary.columns)}")
+    if list(ecdf.columns) != ECDF_COLUMNS:
+        raise RuntimeError(f"G8a.1 schema mismatch in ecdf: {list(ecdf.columns)}")
+    expected_keys = len(LOCKED_GRID_CELLS) * len(dm.CLASSES) * len(LOCKED_GRID_NAMRS) * len(LOCKED_GRID_TELS) * len(LOCKED_GRID_PHYS)
+    if require_full_grid and len(summary) != expected_keys:
+        raise RuntimeError(f"G8a.1 expected {expected_keys} summary rows, got {len(summary)}")
+    if summary.duplicated(subset=KEY).any():
+        raise RuntimeError("G8a.1 duplicate keys in summary")
+    if not set(summary["flag_p99"]).issubset({"OK", "INSUFFICIENT_TAIL_SAMPLES"}):
+        raise RuntimeError("G8a.1 invalid flag_p99 values")
+    if not set(summary["flag_p99_9"]).issubset({"OK", "INSUFFICIENT_TAIL_SAMPLES"}):
+        raise RuntimeError("G8a.1 invalid flag_p99_9 values")
+
+    # 4 & 5 & 6 & 7. Per-key grid reproduction, invariants, offline vs direct, and Monte Carlo
+    high_errs: List[float] = []
+    low_errs: List[float] = []
+    rng_mc = np.random.default_rng(seed)
+
+    for _, row in summary.iterrows():
+        key_tuple = tuple(row[k] for k in KEY)
+        cell, cls, n_amr, lam, phy = int(row["cell"]), str(row["class"]), int(row["N_AMR"]), float(row["lambda_tel_Mbps"]), int(row["phy_rate_Mbps"])
+        p_loss = float(row["p_loss"])
+        if not (0.0 <= p_loss <= 1.0):
+            raise RuntimeError(f"G8a.1 invalid p_loss={p_loss} at {key_tuple}")
+
+        # 5. Monotone miss rates in D, miss_B <= miss_A, late_arrival >= -1e-12
+        for d1, d2 in zip(dm.D_SPECTRUM_MS[:-1], dm.D_SPECTRUM_MS[1:]):
+            if float(row[f"miss_A_{d2}ms"]) > float(row[f"miss_A_{d1}ms"]) + 1e-12:
+                raise RuntimeError(f"G8a.5 non-monotone miss_A at {key_tuple}: D={d1}->{d2}")
+            if float(row[f"miss_B_{d2}ms"]) > float(row[f"miss_B_{d1}ms"]) + 1e-12:
+                raise RuntimeError(f"G8a.5 non-monotone miss_B at {key_tuple}: D={d1}->{d2}")
+        for d in dm.D_SPECTRUM_MS:
+            ma, mb = float(row[f"miss_A_{d}ms"]), float(row[f"miss_B_{d}ms"])
+            if mb > ma + 1e-12:
+                raise RuntimeError(f"G8a.5 miss_B > miss_A at {key_tuple}, D={d}")
+            # Note: in summary, miss_A is the unweighted mean over reps while p_loss is pooled over reps,
+            # which can differ by O(1/n_total) when Late_Arrival == 0; check both summary and exact quantile late_arrival.
+            if ma - p_loss < -1e-4:
+                raise RuntimeError(f"G8a.5 negative late-arrival rate at {key_tuple}, D={d}: {ma} < {p_loss}")
+
+        sub_e = ecdf[
+            (ecdf["cell"] == cell)
+            & (ecdf["class"] == cls)
+            & (ecdf["N_AMR"] == n_amr)
+            & np.isclose(ecdf["lambda_tel_Mbps"], lam)
+            & (ecdf["phy_rate_Mbps"] == phy)
+        ].sort_values("quantile_level")
+
+        n_drops = int(row["n_Drop_Queue"] + row["n_Drop_Retry"] + row["n_Drop_Other"])
+        n_late_term = int(row["n_Late_Termination"])
+        n_deliv = int(row["n_total"]) - n_drops - n_late_term
+        if n_deliv <= 0:
+            continue
+
+        if len(sub_e) != len(dm.QUANTILE_LEVELS):
+            raise RuntimeError(f"G8a.1 expected 25 ECDF rows at {key_tuple}, got {len(sub_e)}")
+        delays = sub_e["delay_ms"].to_numpy(dtype=np.float64)
+        if not np.all(np.isfinite(delays)) or np.any(delays < 0) or np.any(np.diff(delays) < 0):
+            raise RuntimeError(f"G8a.5 invalid or crossing quantiles at {key_tuple}")
+
+        # 4. Grid node reproduction via interpolate() when the slice grid is complete
+        interp = interpolate(summary, ecdf, cell=cell, cls=cls, phy_rate=phy, n_amr=n_amr, lam=lam)
+        if np.all(np.isfinite(interp["delay_ms"])):
+            if abs(float(interp["p_loss"]) - p_loss) > 1e-12 or np.max(np.abs(interp["delay_ms"] - delays)) > 1e-12:
+                raise RuntimeError(f"G8a.4 grid node reproduction failed at {key_tuple}")
+
+        # 6. Offline estimate vs direct measurement
+        p_terminal = (n_drops + n_late_term) / float(row["n_total"])
+        for d in dm.D_SPECTRUM_MS:
+            est_a = dm.miss_a_from_quantiles(float(d), delays, p_loss=p_terminal)
+            est_b = dm.miss_b_from_quantiles(float(d), float(dm.T_PRIMARY_MS), delays, p_loss=p_terminal)
+            if est_a - p_terminal < -1e-12 or est_b - p_terminal < -1e-12 or est_b > est_a + 1e-12:
+                raise RuntimeError(f"G8a.5 quantile evaluator invariant violated at {key_tuple}, D={d}")
+            for direct, est in ((float(row[f"miss_A_{d}ms"]), est_a), (float(row[f"miss_B_{d}ms"]), est_b)):
+                err = abs(est - direct)
+                if direct >= 0.05:
+                    high_errs.append(err)
+                else:
+                    low_errs.append(err)
+
+        # 7. Monte Carlo DKW and binomial checks
+        if mc_draws > 0:
+            draws = sample_delay(delays, p_loss, rng=rng_mc, n_draws=mc_draws)
+            lost_mask = ~np.isfinite(draws)
+            emp_loss = float(np.mean(lost_mask))
+            # 99.99% normal/Exact binomial tolerance around p_loss
+            loss_tol = 4.5 * math.sqrt(max(p_loss * (1.0 - p_loss), 1.0 / mc_draws) / mc_draws) + (2.0 / mc_draws)
+            if abs(emp_loss - p_loss) > loss_tol:
+                raise RuntimeError(f"G8a.7 MC loss {emp_loss:.5f} outside tolerance of {p_loss:.5f} at {key_tuple}")
+            deliv_draws = np.sort(draws[~lost_mask])
+            if deliv_draws.size >= 100:
+                eps_dkw = math.sqrt(math.log(2.0 / 0.01) / (2.0 * deliv_draws.size)) + (1.0 / deliv_draws.size)
+                # Right-continuous and left-continuous empirical CDF at each knot delay
+                cdf_hi = np.searchsorted(deliv_draws, delays, side="right") / deliv_draws.size
+                cdf_lo = np.searchsorted(deliv_draws, delays, side="left") / deliv_draws.size
+                levels_arr = np.asarray(dm.QUANTILE_LEVELS, dtype=np.float64)
+                if np.any(levels_arr < cdf_lo - eps_dkw) or np.any(levels_arr > cdf_hi + eps_dkw):
+                    raise RuntimeError(f"G8a.7 MC quantile draws violated 99% DKW bound ({eps_dkw:.5f}) at {key_tuple}")
+
+    high_mean = float(np.mean(high_errs)) if high_errs else 0.0
+    high_max = float(np.max(high_errs)) if high_errs else 0.0
+    low_mean = float(np.mean(low_errs)) if low_errs else 0.0
+    low_max = float(np.max(low_errs)) if low_errs else 0.0
+
+    if high_errs and (high_mean > 0.025 or high_max > 0.050):
+        raise RuntimeError(f"G8a.6 high-miss offline error exceeded tolerance: mean={high_mean:.4f}, max={high_max:.4f}")
+    if low_errs and (low_mean > 0.005 or low_max > 0.015):
+        raise RuntimeError(f"G8a.6 low-miss offline error exceeded tolerance: mean={low_mean:.4f}, max={low_max:.4f}")
+
+    # 2. Seeded replay determinism and stream isolation
+    first_ecdf = ecdf.head(len(dm.QUANTILE_LEVELS)).sort_values("quantile_level")["delay_ms"].to_numpy()
+    if len(first_ecdf) == len(dm.QUANTILE_LEVELS):
+        g_test = np.linspace(5.0, 55.0, 128)
+        r1 = sample_flow_ner(g_test, first_ecdf, 0.1, run_seed=seed, flow_id="amr[0]->fms", lead_ms=50.0)
+        r2 = sample_flow_ner(g_test, first_ecdf, 0.1, run_seed=seed, flow_id="amr[0]->fms", lead_ms=50.0)
+        r_diff_seed = sample_flow_ner(g_test, first_ecdf, 0.1, run_seed=seed + 1, flow_id="amr[0]->fms", lead_ms=50.0)
+        r_diff_flow = sample_flow_ner(g_test, first_ecdf, 0.1, run_seed=seed, flow_id="amr[1]->fms", lead_ms=50.0)
+        for k in ("dropped", "c_s", "miss_B", "staleness_ticks"):
+            if not np.array_equal(r1[k], r2[k]):
+                raise RuntimeError(f"G8a.2 seeded replay mismatch on {k}")
+        if not np.allclose(r1["delay_ms"], r2["delay_ms"], equal_nan=True):
+            raise RuntimeError("G8a.2 seeded replay mismatch on delay_ms")
+        if np.allclose(r1["delay_ms"], r_diff_seed["delay_ms"], equal_nan=True):
+            raise RuntimeError("G8a.2 different seeds produced identical sequences")
+        if np.allclose(r1["delay_ms"], r_diff_flow["delay_ms"], equal_nan=True):
+            raise RuntimeError("G8a.2 different flow_ids produced identical sequences")
+
+    return {
+        "n_keys": len(summary),
+        "high_miss_count": len(high_errs),
+        "high_miss_mean_err": high_mean,
+        "high_miss_max_err": high_max,
+        "low_miss_count": len(low_errs),
+        "low_miss_mean_err": low_mean,
+        "low_miss_max_err": low_max,
+    }
+
+
 # --------------------------------------------------------------------------- CLI
 def main(argv: Optional[list] = None) -> None:
     p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
@@ -516,7 +880,13 @@ def main(argv: Optional[list] = None) -> None:
     p.add_argument("--warmup", type=float, default=dm.WARMUP_S)
     p.add_argument("--sim-limit", type=float, default=dm.SIM_LIMIT_S)
     p.add_argument("--expected-reps", type=int, default=22,
-                   help="required Stage-2 repetition count per key (0 disables the check)")
+                   help="minimum Stage-2 repetition count per key (0 disables the check); seeds must run "
+                        "contiguously from 0 and all six cells of a slice must share the same count")
+    p.add_argument("--domain-delay", action="store_true",
+                   help="also write lookup_domain_delay.csv (per-run wireless / switch / serialization "
+                        "delay means from the sinks' statistic blocks; Stage 2 only)")
+    p.add_argument("--verify-g8a", action="store_true",
+                   help="run the Phase 8 (G8a) lookup-table and inverse-transform sampler verification suite")
     p.add_argument("--allow-partial-grid", action="store_true",
                    help="allow Stage-2 input that does not contain the full locked factorial grid")
     p.add_argument("--sample", metavar="CELL,N,LAMBDA,PHY",
@@ -561,6 +931,18 @@ def main(argv: Optional[list] = None) -> None:
                 raise SystemExit("--sample matches no rows")
 
     write_tables(summary, ecdf, args.out_dir)
+    if args.domain_delay:
+        if not args.sca_dir:
+            raise SystemExit("--domain-delay needs --sca-dir")
+        domain_table = build_domain_delay_table(Path(args.sca_dir))
+        domain_table.to_csv(Path(args.out_dir) / "lookup_domain_delay.csv", index=False)
+        LOG.info("wrote %d domain-delay rows to %s", len(domain_table), args.out_dir)
+    if args.verify_g8a:
+        report = verify_g8a(
+            summary, ecdf,
+            require_full_grid=not args.allow_partial_grid and not bool(args.sample) and not bool(args.packets),
+        )
+        LOG.info("G8a verification passed: %s", report)
     LOG.info("wrote %d summary rows and %d ecdf rows to %s", len(summary), len(ecdf), args.out_dir)
 
 

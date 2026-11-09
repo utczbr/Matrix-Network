@@ -14,8 +14,11 @@ import numpy as np
 import pandas as pd
 
 import deadline_metrics as dm
+import schedule_geometry as sg
 
 CONDITION = ["class", "N_AMR", "lambda_tel_Mbps", "phy_rate_Mbps"]
+# A point is near-structural when the schedule's worst-case wait is within 10% of the deadline.
+NEAR_STRUCTURAL_FRACTION = 0.9
 
 
 def _effect(values: np.ndarray) -> tuple[float, float]:
@@ -33,7 +36,7 @@ def build_contrasts(replications: pd.DataFrame, deadline_ms: int | None = None) 
 
     rows = []
     for condition, group in replications.groupby(CONDITION, sort=True):
-        cls = condition[0]
+        cls, n_amr, _lam, phy = condition
         d_eval = dm.NOMINAL_D_MS[cls] if deadline_ms is None else int(deadline_ms)
         metric = f"miss_B_{d_eval}ms"
         pivot = group.pivot(index="rep", columns="cell", values=metric)
@@ -62,6 +65,29 @@ def build_contrasts(replications: pd.DataFrame, deadline_ms: int | None = None) 
         else:
             dominant = "mixed_or_uncertain"
 
+        # Structural points: the wireless contrasts subtract scheduled cells from CSMA cells, so a
+        # deterministic schedule wait (worst-case wait >= deadline) appears as a negative wireless
+        # gain and can make the point read as wired-dominated. Wired contrasts stay valid because
+        # they difference cells that share the same radio regime.
+        radio_penalty = False
+        bound_ms = sg.worst_case_wait_ms(cls, int(n_amr), phy)
+        structural = bound_ms >= d_eval
+        near_structural = (not structural) and bound_ms >= NEAR_STRUCTURAL_FRACTION * d_eval
+        if structural:
+            wireless_mean = wireless_ci = float("nan")
+            difference_mean = difference_ci = float("nan")
+            dominant = "structural_schedule_wait"
+        elif np.isfinite(wireless_ci) and wireless_mean + wireless_ci < 0:
+            # Scheduled radio is significantly WORSE than CSMA (for example a capacity-limited
+            # schedule: Orders at N=80, 12 Mbps runs at about 92% AP utilization). That is a real
+            # wireless-side effect: keep the numbers and always set the flag. Relabel the point only
+            # when wired does not clearly dominate, so a large wired FIFO-to-TAS gain (for example a
+            # saturated FIFO port) is not hidden behind a small radio penalty.
+            radio_penalty = True
+            wired_dominates = bool(np.isfinite(wired_ci) and (wired_mean - wired_ci) > abs(wireless_mean))
+            if not wired_dominates:
+                dominant = "scheduled_radio_penalty"
+
         rows.append({
             **dict(zip(CONDITION, condition)),
             "n_paired_reps": len(pivot),
@@ -76,6 +102,11 @@ def build_contrasts(replications: pd.DataFrame, deadline_ms: int | None = None) 
             "wireless_minus_wired": difference_mean,
             "ci95_wireless_minus_wired": difference_ci,
             "dominant_bottleneck": dominant,
+            "schedule_wait_bound_ms": bound_ms,
+            "schedule_utilization": sg.scheduled_utilization(cls, int(n_amr), phy),
+            "scheduled_radio_penalty_flag": radio_penalty,
+            "structural_tdma_exceeds_deadline": bool(structural),
+            "near_structural": bool(near_structural),
         })
     return pd.DataFrame(rows)
 

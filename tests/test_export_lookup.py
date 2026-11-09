@@ -237,3 +237,56 @@ attr repetition 0
     with pytest.raises(RuntimeError, match="unmapped telInterval '9999us'"):
         ex.build_tables_from_sca(tmp_path)
 
+
+# ---- reference inverse-transform sampler & G8a verification (SPEC section 2.2 / Phase 8)
+def test_sample_delay_inverse_transform_and_loss(tables):
+    _, summary, ecdf = tables
+    row = summary.iloc[0]
+    delays = ecdf[
+        (ecdf["cell"] == row["cell"])
+        & (ecdf["class"] == row["class"])
+        & (ecdf["N_AMR"] == row["N_AMR"])
+        & np.isclose(ecdf["lambda_tel_Mbps"], row["lambda_tel_Mbps"])
+    ].sort_values("quantile_level")["delay_ms"].to_numpy()
+    rng = np.random.default_rng(12345)
+    draws = ex.sample_delay(delays, 0.15, rng=rng, n_draws=50_000)
+    assert np.isclose(np.mean(~np.isfinite(draws)), 0.15, atol=0.008)
+    deliv = draws[np.isfinite(draws)]
+    assert deliv.min() >= delays[0] - 1e-12 and deliv.max() <= delays[-1] + 1e-12
+
+
+def test_sample_flow_ner_seeded_replay_and_isolation(tables):
+    _, _, ecdf = tables
+    delays = ecdf.head(25).sort_values("quantile_level")["delay_ms"].to_numpy()
+    g = np.linspace(5.0, 55.0, 200)
+    a1 = ex.sample_flow_ner(g, delays, 0.05, run_seed=77, flow_id="fms->amr[0]", lead_ms=50.0)
+    a2 = ex.sample_flow_ner(g, delays, 0.05, run_seed=77, flow_id="fms->amr[0]", lead_ms=50.0)
+    b1 = ex.sample_flow_ner(g, delays, 0.05, run_seed=77, flow_id="fms->amr[1]", lead_ms=50.0)
+    assert np.array_equal(a1["dropped"], a2["dropped"])
+    assert np.allclose(a1["delay_ms"], a2["delay_ms"], equal_nan=True)
+    assert np.array_equal(a1["c_s"], a2["c_s"])
+    assert np.array_equal(a1["staleness_ticks"], a2["staleness_ticks"])
+    assert not np.allclose(a1["delay_ms"], b1["delay_ms"], equal_nan=True)
+
+
+def test_verify_g8a_passes_on_valid_tables_and_catches_mutations(tables):
+    _, summary, ecdf = tables
+    report = ex.verify_g8a(summary, ecdf, require_full_grid=False, mc_draws=10_000)
+    assert report["n_keys"] == len(summary)
+    assert report["low_miss_mean_err"] <= 0.005
+
+    # Mutation 1: crossing quantile in ECDF is caught by G8a.5
+    bad_ecdf = ecdf.copy()
+    bad_ecdf.loc[bad_ecdf.index[5], "delay_ms"] = bad_ecdf.loc[bad_ecdf.index[4], "delay_ms"] - 1.0
+    with pytest.raises(RuntimeError, match="G8a.5"):
+        ex.verify_g8a(summary, bad_ecdf, require_full_grid=False, mc_draws=0)
+
+    # Mutation 2: corrupted direct miss rates (preserving monotonicity and miss_B <= miss_A) caught by G8a.6
+    bad_summary = summary.copy()
+    for d in dm.D_SPECTRUM_MS:
+        bad_summary.loc[bad_summary.index[0], f"miss_A_{d}ms"] += 0.020
+        bad_summary.loc[bad_summary.index[0], f"miss_B_{d}ms"] += 0.020
+    with pytest.raises(RuntimeError, match="G8a.6"):
+        ex.verify_g8a(bad_summary, ecdf, require_full_grid=False, mc_draws=0)
+
+

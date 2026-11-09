@@ -1,6 +1,6 @@
 # Validation and Results Status
 
-**Revision:** October 18, 2026
+**Revision:** November 9, 2026 (`HEAD = 7e1355ba7d`, `libmatrixfactory.so` SHA-256 `4c2b7843273b…`)
 
 Implementation responsibilities are mapped in the corresponding `docs/SPEC-*.md` files. Pre-production acceptance suites and the statistical pilot campaign are validated and recorded below; full-scale production results (the 10,560-run sweep) remain pending campaign execution.
 
@@ -35,11 +35,11 @@ conservation, every valid delivery had a complete domain breakdown, and Orders
 were delivered through the stripped-tag AP path.
 
 The repaired scheduled-access acceptance trio also completed at its full 10 s
-horizon. N=40/54 Mbps recorded 12,100 wireless transmissions, zero scheduled
-retries, and 20.238 ms maximum State delay. N=80/12 Mbps resolved to 850 µs
+horizon (`HEAD = 7e1355ba7d`). N=40/54 Mbps recorded 12,100 wireless transmissions, zero scheduled
+retries, and 20.238 ms maximum State delay (`Orders` p50 7.958 ms, max 17.230 ms, 29,751 valid packets conserved). N=80/12 Mbps resolved to 850 µs
 State slots, 560 µs Orders slots, 39 AP slots, and a 90 ms superframe; it
-recorded 23,966 wireless transmissions, zero retries or retry-limit drops,
-90.876 ms maximum State delay, and exact conservation of 35,628 valid packets.
+recorded 23,968 wireless transmissions (up from 23,966 after commit `8a66438ed0` merged contiguous AP slots, allowing one additional `Orders` DATA+ACK exchange—4,026 vs. 4,025—to finish before 10 s), zero retries or retry-limit drops,
+90.876 ms maximum State delay (44.96% Definition-A and 39.45% Definition-B misses at 50 ms on 7,923 valid State packets; `Orders` p50 49.870 ms, max 152.786 ms, 49.84% Definition-A and 42.85% Definition-B misses at 50 ms, 7.82% and 6.04% at 100 ms on 3,991 valid Orders packets), and exact conservation of 35,628 valid packets.
 The matched N=40/54 Mbps CSMA control recorded 8 retries. These runs are
 acceptance and integration evidence only; they are not pilot or production
 results.
