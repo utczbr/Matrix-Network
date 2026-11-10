@@ -15,9 +15,9 @@ modulo is forbidden.
 | `initialize` | Reads slot geometry and rejects nonpositive durations, out-of-frame allocations, or exchanges too long for a slot. |
 | `isWithinActiveSlot` | Maps the current time into the phase-adjusted superframe and checks both slot membership and remaining exchange time. When multiple contiguous slots are assigned (as in the AP downlink allocation), remaining time is evaluated against the end of the entire contiguous block rather than individual sub-slot boundaries. |
 | `computeNextSlotStart` | Finds the earliest assigned slot boundary strictly after the current time, including times before the configured phase offset. |
-| `scheduleNextSlotTimer` / `handleMessage` | Arms the next boundary and requests channel access when queued frames are waiting. |
+| `scheduleNextSlotTimer` / `handleMessage` | Arms the next boundary and requests channel access via `hasFrameToTransmit()` (covering both `pendingQueue` and prefetched `inProgressFrames`) when frames are waiting. |
 | `processUpperFrame` | Sends immediately through DCF when an exchange fits; otherwise queues the frame until its next slot. |
-| `channelGranted` / `frameSequenceFinished` | Releases grants received outside an eligible slot and resumes or defers queued transmissions after each sequence. |
+| `channelGranted` / `frameSequenceFinished` | Releases grants received outside an eligible slot and resumes or defers queued/in-progress transmissions via `hasFrameToTransmit()` after each sequence. |
 | `finish` | Records `scheduledDcf_numSlotDeferrals`, `scheduledDcf_numDeferredOnEnqueue`, `scheduledDcf_numGrantReleased`, and `scheduledDcf_numGrantedInSlot`. |
 
 The acceptance checks in `analysis/verify_spike_s1.py` validate resolved slot parameters, successful scheduled traffic, retry counters, and the State delay bound at nominal and stress points.

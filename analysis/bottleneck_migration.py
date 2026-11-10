@@ -75,6 +75,7 @@ def build_contrasts(replications: pd.DataFrame, deadline_ms: int | None = None) 
         # gain and can make the point read as wired-dominated. Wired contrasts stay valid because
         # they difference cells that share the same radio regime.
         radio_penalty = False
+        tas_penalty = bool(np.isfinite(wired_ci) and wired_mean + wired_ci < 0)
         bound_ms = sg.worst_case_wait_ms(cls, int(n_amr), phy)
         structural = bound_ms >= d_eval
         near_structural = (not structural) and bound_ms >= NEAR_STRUCTURAL_FRACTION * d_eval
@@ -92,6 +93,14 @@ def build_contrasts(replications: pd.DataFrame, deadline_ms: int | None = None) 
             wired_dominates = bool(np.isfinite(wired_ci) and (wired_mean - wired_ci) > abs(wireless_mean))
             if not wired_dominates:
                 dominant = "scheduled_radio_penalty"
+        elif tas_penalty:
+            # Wired TAS gating is significantly WORSE than FIFO (for example telemetry offered above
+            # its 44.8 Mbps GCL allocation). Because wireless - wired turns positive when wired < 0,
+            # do not mislabel it as a wireless bottleneck unless wireless gain clearly exceeds the
+            # wired TAS penalty.
+            wireless_dominates = bool(np.isfinite(wireless_ci) and (wireless_mean - wireless_ci) > abs(wired_mean))
+            if not wireless_dominates:
+                dominant = "wired_tas_penalty"
 
         rows.append({
             **dict(zip(CONDITION, condition)),
@@ -110,6 +119,7 @@ def build_contrasts(replications: pd.DataFrame, deadline_ms: int | None = None) 
             "schedule_wait_bound_ms": bound_ms,
             "schedule_utilization": sg.scheduled_utilization(cls, int(n_amr), phy),
             "scheduled_radio_penalty_flag": radio_penalty,
+            "wired_tas_penalty_flag": tas_penalty,
             "structural_tdma_exceeds_deadline": bool(structural),
             "near_structural": bool(near_structural),
         })

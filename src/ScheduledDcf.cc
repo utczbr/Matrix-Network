@@ -148,8 +148,9 @@ void ScheduledDcf::handleMessage(cMessage *msg)
 {
     if (msg == slotStartTimer) {
         // Own TDMA slot has started: request the channel if frames are waiting
+        // (either in pendingQueue or already prefetched into inProgressFrames)
         // and no frame sequence is already active.
-        if (!channelAccess->getPendingQueue()->isEmpty() && !frameSequenceHandler->isSequenceRunning()) {
+        if (hasFrameToTransmit() && !frameSequenceHandler->isSequenceRunning()) {
             channelAccess->requestChannel(this);
         }
     }
@@ -188,7 +189,7 @@ void ScheduledDcf::channelGranted(IChannelAccess *grantedAccess)
         numSlotDeferrals++;
         numGrantReleased++;
         channelAccess->releaseChannel(this);
-        if (!channelAccess->getPendingQueue()->isEmpty())
+        if (hasFrameToTransmit())
             scheduleNextSlotTimer(simTime());
         return;
     }

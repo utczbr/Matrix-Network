@@ -161,3 +161,25 @@ def test_penalty_flag_is_false_without_a_significant_negative_wireless_effect():
     rates = {1: 0.40, 2: 0.10, 3: 0.40, 4: 0.10, 5: 0.40, 6: 0.10}  # scheduled radio helps
     row = bm.build_contrasts(_frame("state", 40, 54, rates)).iloc[0]
     assert bool(row["scheduled_radio_penalty_flag"]) is False
+    assert bool(row["wired_tas_penalty_flag"]) is False
+
+
+def test_wired_tas_penalty_for_telemetry_is_not_read_as_wireless_bottleneck():
+    # High-load telemetry above TAS's 44.8 Mbps cap loses ~33% more under TAS (Cells 5,6)
+    # than under FIFO (Cells 1,2), while wireless gain is zero. Subtracting negative wired
+    # gain made (wireless - wired) positive, which previously mislabelled telemetry as "wireless".
+    rates = {1: 0.37, 2: 0.37, 3: 0.37, 4: 0.37, 5: 0.70, 6: 0.70}
+    row = bm.build_contrasts(_frame("telemetry", 80, 12, rates)).iloc[0]
+    assert row["wireless_gain"] == pytest.approx(0.0)
+    assert row["wired_fifo_to_tas_gain"] == pytest.approx(-0.33)
+    assert bool(row["wired_tas_penalty_flag"]) is True
+    assert row["dominant_bottleneck"] == "wired_tas_penalty"
+
+
+def test_large_wireless_gain_is_not_hidden_behind_a_small_tas_penalty():
+    rates = {1: 0.45, 2: 0.05, 3: 0.45, 4: 0.05, 5: 0.50, 6: 0.10}
+    row = bm.build_contrasts(_frame("state", 40, 54, rates)).iloc[0]
+    assert row["wireless_gain"] == pytest.approx(0.40)
+    assert row["wired_fifo_to_tas_gain"] == pytest.approx(-0.05)
+    assert bool(row["wired_tas_penalty_flag"]) is True
+    assert row["dominant_bottleneck"] == "wireless"

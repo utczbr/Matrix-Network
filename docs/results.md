@@ -1,6 +1,6 @@
 # Validation and Results Status
 
-**Revision:** November 9, 2026 (`HEAD = 7e1355ba7d`, `libmatrixfactory.so` SHA-256 `4c2b7843273b…`)
+**Revision:** November 10, 2026 (`libmatrixfactory.so` SHA-256 `63dd72db2c65…`, updated after `ScheduledDcf::hasFrameToTransmit()` fix)
 
 Implementation responsibilities are mapped in the corresponding `docs/SPEC-*.md` files. Pre-production acceptance suites and the statistical pilot campaign are validated and recorded below; full-scale production results (the 10,560-run sweep) remain pending campaign execution.
 
@@ -19,8 +19,16 @@ No production campaign result is currently claimed. Historical pilot numbers pri
   real queue/retry/other drop counters.
 - The exporter reports a Wilson upper endpoint for the nominal miss proportion,
   separate p99/p99.9 adequacy flags, and a paired-replication table.
+- `ScheduledDcf::handleMessage` and `ScheduledDcf::channelGranted` now check
+  `hasFrameToTransmit()` (covering both `pendingQueue` and prefetched
+  `inProgressFrames`) so frames prefetched during an active frame sequence are
+  never stranded across TDMA cycles when `pendingQueue` empties (fixing an issue
+  caught in the Phase 5b Dry Run where $N=5, 12\text{ Mbps}$ `Orders` E2E delay
+  dropped from $44.60\text{ ms}$ to $4.13\text{ ms}$).
 - `bottleneck_migration.py` computes paired wireless and wired effects with
-  confidence intervals.
+  confidence intervals, adding `wired_tas_penalty` / `wired_tas_penalty_flag`
+  for TAS-throttled wired flows (e.g., high-load `telemetry`) alongside
+  `scheduled_radio_penalty`.
 - The quantile contract is synchronized at 25 levels.
 - The campaign replication floor is 22, confirmed by the repaired
   primary-miss-rate pilot (achieving 6.25% relative error at 95% CI).
@@ -35,7 +43,7 @@ conservation, every valid delivery had a complete domain breakdown, and Orders
 were delivered through the stripped-tag AP path.
 
 The repaired scheduled-access acceptance trio also completed at its full 10 s
-horizon (`HEAD = 7e1355ba7d`). N=40/54 Mbps recorded 12,100 wireless transmissions, zero scheduled
+horizon (`libmatrixfactory.so` SHA-256 `63dd72db2c65…`). N=40/54 Mbps recorded 12,100 wireless transmissions, zero scheduled
 retries, and 20.238 ms maximum State delay (`Orders` p50 7.958 ms, max 17.230 ms, 29,751 valid packets conserved). N=80/12 Mbps resolved to 850 µs
 State slots, 560 µs Orders slots, 39 AP slots, and a 90 ms superframe; it
 recorded 23,968 wireless transmissions (up from 23,966 after commit `8a66438ed0` merged contiguous AP slots, allowing one additional `Orders` DATA+ACK exchange—4,026 vs. 4,025—to finish before 10 s), zero retries or retry-limit drops,
