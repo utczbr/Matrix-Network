@@ -453,7 +453,7 @@ Of the 72 baseline parameter grid points ($6\ \text{cells} \times 4\ N \times 3\
 
 ### 4.1 Evidence-Graded Traffic Class and Protocol Characterization
 
-The four simulated classes (`Orders`, `State`, `DDS`, `Telemetry`) are distinct from the four protocols they abstract (VDA 5050, DDS-RTPS, OPC UA, MQTT). The five-part, evidence-labelled characterization (**Paper / Derive / Choice / Standard / Verify**) lives in `docs/parameters.md` §6.3 and is regenerated for `docs/capacity.md` §5; `analysis/check_parameters.py` audits it. No broker process is modelled: `fms` is a direct UDP endpoint (**Choice**).
+The four simulated classes (`Orders`, `State`, `DDS`, `Telemetry`) are **protocol-inspired, open-loop UDP traffic classes** distinct from full transport/session implementations of the four protocols they abstract (VDA 5050, DDS-RTPS, OPC UA, MQTT). The five-part, evidence-labelled characterization (**Paper / Derive / Choice / Standard / Verify**) lives in `docs/parameters.md` §6.3 and is regenerated for `docs/capacity.md` §5; `analysis/check_parameters.py` audits it. No broker process is modelled: `fms` is a direct UDP endpoint (**Choice**). Scope limit: closed-loop TCP congestion control would alter offered rates across cells and violate Checklist C8 offered-load parity, and the $149.3\ \text{Mbps}$ telemetry overload level on the $100\ \text{Mbps}$ wired link exists specifically for non-reactive open-loop traffic.
 
 ---
 

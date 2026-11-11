@@ -183,3 +183,47 @@ def test_large_wireless_gain_is_not_hidden_behind_a_small_tas_penalty():
     assert row["wired_fifo_to_tas_gain"] == pytest.approx(-0.05)
     assert bool(row["wired_tas_penalty_flag"]) is True
     assert row["dominant_bottleneck"] == "wireless"
+
+
+# ---------------------------------------------------------------- unexplained penalties and effect-size floor
+def test_stranded_frame_defect_pattern_is_labelled_for_investigation():
+    # N=5, 12 Mbps, Orders: the AP is 15% utilized and the geometry wait (5.4 ms) is far below the 50 ms
+    # deadline, yet the scheduled cells miss 28%. Nothing in the schedule explains that.
+    rates = {1: 0.0, 2: 0.28, 3: 0.0, 4: 0.28, 5: 0.0, 6: 0.28}
+    row = bm.build_contrasts(_frame("orders", 5, 12, rates)).iloc[0]
+    assert row["schedule_utilization"] == pytest.approx(0.15)
+    assert bool(row["scheduled_radio_penalty_flag"]) is True
+    assert bool(row["unexplained_radio_penalty_flag"]) is True
+    assert row["dominant_bottleneck"] == "unexplained_radio_penalty"
+
+
+def test_capacity_limited_penalty_is_explained_not_flagged_for_investigation():
+    rates = {1: 0.0, 2: 0.06, 3: 0.0, 4: 0.06, 5: 0.0, 6: 0.06}
+    row = bm.build_contrasts(_frame("orders", 80, 12, rates), deadline_ms=100).iloc[0]
+    assert bool(row["unexplained_radio_penalty_flag"]) is False
+    assert row["dominant_bottleneck"] == "scheduled_radio_penalty"
+
+
+def test_near_structural_point_is_not_called_unexplained():
+    # State at N=80, 54 Mbps waits up to 48 ms against a 50 ms deadline: any penalty there has a known cause.
+    row = bm.build_contrasts(_frame("state", 80, 54, STRUCTURAL_RATES)).iloc[0]
+    assert bool(row["near_structural"]) is True and bool(row["scheduled_radio_penalty_flag"]) is True
+    assert bool(row["unexplained_radio_penalty_flag"]) is False
+    assert row["dominant_bottleneck"] == "scheduled_radio_penalty"
+
+
+def test_state_penalty_at_light_load_is_unexplained():
+    rates = {1: 0.0, 2: 0.06, 3: 0.0, 4: 0.06, 5: 0.0, 6: 0.06}
+    row = bm.build_contrasts(_frame("state", 40, 54, rates)).iloc[0]
+    assert row["schedule_wait_bound_ms"] == pytest.approx(20.0)
+    assert bool(row["unexplained_radio_penalty_flag"]) is True
+
+
+def test_effects_below_one_point_never_raise_penalty_flags():
+    rates = {1: 0.100, 2: 0.106, 3: 0.100, 4: 0.106, 5: 0.100, 6: 0.106}  # radio -0.006, exact
+    row = bm.build_contrasts(_frame("orders", 40, 12, rates)).iloc[0]
+    assert row["wireless_gain"] == pytest.approx(-0.006)
+    assert bool(row["scheduled_radio_penalty_flag"]) is False
+    tas = {1: 0.100, 2: 0.100, 3: 0.100, 4: 0.100, 5: 0.106, 6: 0.106}  # TAS -0.006, exact
+    row = bm.build_contrasts(_frame("telemetry", 40, 12, tas)).iloc[0]
+    assert bool(row["wired_tas_penalty_flag"]) is False

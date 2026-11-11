@@ -293,3 +293,89 @@ def test_validate_rejects_a_sink_missing_a_domain_statistic_even_if_another_sink
     path.write_text("\n".join(out) + "\n")
     with pytest.raises(RuntimeError, match="wirelessDomainDelay_ms missing on 1 of 1"):
         rc.validate_sca_file(path, spec)
+
+
+# ---------------------------------------------------------------- launcher hardening (rev 8 / rev 9)
+def test_wait4_reports_per_child_rss_not_running_maximum(tmp_path):
+    # Child 1 allocates ~60 MB; Child 2 allocates nothing. Under RUSAGE_CHILDREN Child 2 would inherit ~60 MB.
+    rc1, rss1_kb, to1 = rc.run_subprocess_wait4(
+        [sys.executable, "-c", "buf = bytearray(60 * 1024 * 1024); print(len(buf))"],
+        tmp_path / "big.log",
+    )
+    rc2, rss2_kb, to2 = rc.run_subprocess_wait4(
+        [sys.executable, "-c", "print('small')"],
+        tmp_path / "small.log",
+    )
+    assert rc1 == 0 and rc2 == 0 and not to1 and not to2
+    assert rss1_kb > rss2_kb + 30_000, f"expected big child RSS ({rss1_kb} KB) >> small child RSS ({rss2_kb} KB)"
+
+
+def test_run_subprocess_wait4_enforces_timeout(tmp_path):
+    code, rss_kb, timed_out = rc.run_subprocess_wait4(
+        [sys.executable, "-c", "import time; time.sleep(5)"],
+        tmp_path / "timeout.log",
+        timeout_sec=0.15,
+    )
+    assert timed_out is True and code == 124 and rss_kb > 0
+    assert "Process timed out" in (tmp_path / "timeout.log").read_text()
+
+
+def test_resume_rejects_output_from_different_library_sha256_and_records_git_state(tmp_path):
+    spec = rc.RunSpec(2, 42, 80, 12, "300us", 0)
+    out_dir = tmp_path / "campaign"
+    manifest = tmp_path / "evidence" / "manifest.csv"
+    logs = tmp_path / "evidence" / "logs"
+    calls = []
+
+    def fake_runner(s, odir, log_path, _sim_limit):
+        calls.append(s.run_number)
+        write_valid_sca(s.sca_path(odir), s)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text("ok\n")
+        return 0, 10_000
+
+    res1 = rc.execute_run_with_retry(
+        spec,
+        out_dir=out_dir,
+        manifest_path=manifest,
+        log_dir=logs,
+        lib_sha256="hash_v1",
+        git_head="deadbeef",
+        git_dirty=False,
+        runner=fake_runner,
+    )
+    assert res1["status"] == "completed" and calls == [42]
+
+    # Same library hash -> skipped
+    res2 = rc.execute_run_with_retry(
+        spec,
+        out_dir=out_dir,
+        manifest_path=manifest,
+        log_dir=logs,
+        lib_sha256="hash_v1",
+        runner=fake_runner,
+    )
+    assert res2["status"] == "skipped" and calls == [42]
+
+    # Different library hash -> stale output rejected and re-run
+    res3 = rc.execute_run_with_retry(
+        spec,
+        out_dir=out_dir,
+        manifest_path=manifest,
+        log_dir=logs,
+        lib_sha256="hash_v2",
+        git_head="cafebabe",
+        git_dirty=True,
+        runner=fake_runner,
+    )
+    assert res3["status"] == "completed" and calls == [42, 42]
+    df_m = pd.read_csv(manifest)
+    assert list(df_m["library_sha256"]) == ["hash_v1", "hash_v2"]
+    assert list(df_m["git_head"]) == ["deadbeef", "cafebabe"]
+    assert list(df_m["git_dirty"]) == [0, 1]
+
+
+def test_main_requires_expected_lib_sha256_unless_explicitly_unpinned():
+    with pytest.raises(RuntimeError, match="requires --expected-lib-sha256"):
+        rc.main([])
+

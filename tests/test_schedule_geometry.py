@@ -47,5 +47,14 @@ def test_scheduled_utilization_values():
     assert sg.scheduled_utilization("state", 80, 54) == pytest.approx(0.48)
     # Orders: 80 AMRs x 5 Hz = 400/s into 39 AP slots per 90 ms superframe = 36/39.
     assert sg.scheduled_utilization("orders", 80, 12) == pytest.approx(36 / 39)
-    assert sg.scheduled_utilization("orders", 80, 54) == pytest.approx(80 * 5 * 0.048 / 39)
+    # At 54 Mbps an exchange (170 us + 28 us DIFS) is about half a 400 us slot, so the merged block holds
+    # about 2 frames per slot: 78 frames, not 39.
+    assert sg.scheduled_utilization("orders", 80, 54) == pytest.approx(80 * 5 * 0.048 / 78)
     assert sg.scheduled_utilization("dds", 80, 12) == 0.0
+
+
+def test_ap_capacity_equals_slot_count_at_12mbps_and_about_double_at_54mbps():
+    # 12 Mbps: the 550.133 us cycle is slightly under the 560 us slot (K = 39 measured by saturating the AP).
+    assert [sg.ap_frames_per_superframe(n, 12) for n in (5, 10, 20, 40, 80)] == [1, 1, 3, 10, 39]
+    # 54 Mbps: the 198.133 us cycle fits about twice into a 400 us slot.
+    assert [sg.ap_frames_per_superframe(n, 54) for n in (5, 10, 20, 40, 80)] == [2, 2, 4, 16, 78]

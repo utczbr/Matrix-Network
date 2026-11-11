@@ -26,6 +26,7 @@ import logging
 import os
 import re
 import shutil
+import signal
 import socket
 import threading
 import subprocess
@@ -74,6 +75,8 @@ MANIFEST_COLUMNS = [
     "sca_bytes",
     "sca_sha256",
     "library_sha256",
+    "git_head",
+    "git_dirty",
 ]
 
 _RUN_LINE_RE = re.compile(
@@ -117,6 +120,23 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: f.read(65536), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def get_git_state(repo_dir: Path = Path(PROJECT_ROOT)) -> Tuple[str, bool]:
+    """Return (git_head_sha, git_dirty_bool) for repo_dir."""
+    head_res = subprocess.run(
+        ["git", "-C", str(repo_dir), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+    )
+    head = head_res.stdout.strip() if head_res.returncode == 0 else "unknown"
+    status_res = subprocess.run(
+        ["git", "-C", str(repo_dir), "status", "--porcelain"],
+        capture_output=True,
+        text=True,
+    )
+    dirty = bool(status_res.stdout.strip()) if status_res.returncode == 0 else True
+    return head, dirty
 
 
 def check_library_gate(
@@ -216,10 +236,17 @@ def order_runs_slice_major(
     specs: Sequence[RunSpec],
     *,
     dry_run_corners: bool = False,
+    namrs: Optional[Iterable[int]] = None,
+    phys: Optional[Iterable[int]] = None,
+    tels: Optional[Iterable[str]] = None,
     max_reps: Optional[int] = None,
     shard: Optional[Tuple[int, int]] = None,
 ) -> List[RunSpec]:
     """Order runs slice-major (all 6 cells and all reps of a slice together), priority slices first."""
+    namr_set = {int(x) for x in namrs} if namrs is not None else None
+    phy_set = {int(x) for x in phys} if phys is not None else None
+    tel_set = {str(x) for x in tels} if tels is not None else None
+
     filtered: List[RunSpec] = []
     for s in specs:
         if dry_run_corners:
@@ -230,6 +257,12 @@ def order_runs_slice_major(
                 or s.rep not in CORNER_REPS
             ):
                 continue
+        if namr_set is not None and s.n_amr not in namr_set:
+            continue
+        if phy_set is not None and s.phy_rate_mbps not in phy_set:
+            continue
+        if tel_set is not None and s.tel_interval not in tel_set:
+            continue
         if max_reps is not None and s.rep >= int(max_reps):
             continue
         filtered.append(s)
@@ -341,10 +374,50 @@ def compress_sca_file(sca_path: Path) -> Path:
     return gz_path
 
 
-def find_existing_valid_output(out_dir: Path, spec: RunSpec) -> Optional[Path]:
-    """Return the existing .sca.gz or .sca path if present and valid; delete corrupt partials."""
+_MANIFEST_LOCK = threading.Lock()
+
+
+def manifest_has_matching_run(manifest_path: Path, spec: RunSpec, lib_sha256: str) -> bool:
+    """Return True iff manifest_path has a completed row (exit_code == 0) for spec with library_sha256 == lib_sha256."""
+    manifest_path = Path(manifest_path)
+    if not manifest_path.exists() or manifest_path.stat().st_size == 0:
+        return False
+    expected = lib_sha256.strip().lower()
+    matched = False
+    with _MANIFEST_LOCK:
+        with open(manifest_path, "r", newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    if int(row.get("cell", -1)) == spec.cell and int(row.get("run_number", -1)) == spec.run_number:
+                        if int(row.get("exit_code", 1)) == 0:
+                            actual = str(row.get("library_sha256", "")).strip().lower()
+                            matched = bool(actual) and (actual == expected)
+                except ValueError:
+                    continue
+    return matched
+
+
+def find_existing_valid_output(
+    out_dir: Path,
+    spec: RunSpec,
+    manifest_path: Optional[Path] = None,
+    lib_sha256: Optional[str] = None,
+) -> Optional[Path]:
+    """Return the existing .sca.gz or .sca path if present, valid, and matching manifest library_sha256."""
     gz_path = spec.sca_gz_path(out_dir)
     sca_path = spec.sca_path(out_dir)
+    if manifest_path is not None and lib_sha256 is not None:
+        if (gz_path.exists() or sca_path.exists()) and not manifest_has_matching_run(manifest_path, spec, lib_sha256):
+            LOG.warning(
+                "Rejecting existing output for %s run %d: missing or mismatched library_sha256 in %s",
+                spec.config_name,
+                spec.run_number,
+                manifest_path,
+            )
+            gz_path.unlink(missing_ok=True)
+            sca_path.unlink(missing_ok=True)
+            return None
     for candidate in (gz_path, sca_path):
         if candidate.exists():
             try:
@@ -359,9 +432,6 @@ def find_existing_valid_output(out_dir: Path, spec: RunSpec) -> Optional[Path]:
     return None
 
 
-_MANIFEST_LOCK = threading.Lock()
-
-
 def append_manifest_row(manifest_path: Path, row: Dict[str, object]) -> None:
     """Append one row; serialized so concurrent workers cannot write a second header or interleave rows."""
     manifest_path = Path(manifest_path)
@@ -372,38 +442,90 @@ def append_manifest_row(manifest_path: Path, row: Dict[str, object]) -> None:
             writer = csv.DictWriter(f, fieldnames=MANIFEST_COLUMNS)
             if write_header:
                 writer.writeheader()
-            writer.writerow({k: row[k] for k in MANIFEST_COLUMNS})
+            writer.writerow({k: row.get(k, "") for k in MANIFEST_COLUMNS})
 
 
-def default_runner(spec: RunSpec, out_dir: Path, log_path: Path, sim_time_limit: Optional[str] = None) -> Tuple[int, int]:
-    """Run one OMNeT++ simulation and return (exit_code, max_rss_kb)."""
+_WAIT4_SHIM = (
+    "import os, subprocess, sys; "
+    "c = subprocess.Popen(sys.argv[2:]); "
+    "_, st, ru = os.wait4(c.pid, 0); "
+    "open(sys.argv[1], 'w').write(str(int(ru.ru_maxrss))); "
+    "sys.exit(os.waitstatus_to_exitcode(st))"
+)
+
+
+def run_subprocess_wait4(
+    cmd_args: Sequence[str],
+    log_path: Path,
+    timeout_sec: Optional[float] = None,
+) -> Tuple[int, int, bool]:
+    """Spawn cmd_args via a clean post-exec shim, reap via os.wait4 for untainted per-run ru_maxrss, and enforce timeout."""
+    log_path = Path(log_path)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    rss_path = log_path.with_suffix(log_path.suffix + ".rss")
+    rss_path.unlink(missing_ok=True)
+    timed_out = False
+    with open(log_path, "w", encoding="utf-8") as log_f:
+        proc = subprocess.Popen(
+            [sys.executable, "-S", "-c", _WAIT4_SHIM, str(rss_path), *cmd_args],
+            stdout=log_f,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+
+        def _on_timeout() -> None:
+            nonlocal timed_out
+            timed_out = True
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+        timer = threading.Timer(float(timeout_sec), _on_timeout) if timeout_sec is not None else None
+        if timer is not None:
+            timer.daemon = True
+            timer.start()
+        try:
+            _, status, rusage = os.wait4(proc.pid, 0)
+        finally:
+            if timer is not None:
+                timer.cancel()
+        rc = os.waitstatus_to_exitcode(status)
+        proc.returncode = rc
+        max_rss_kb = int(rusage.ru_maxrss)
+        if rss_path.exists():
+            try:
+                max_rss_kb = int(rss_path.read_text(encoding="utf-8").strip())
+            except ValueError:
+                pass
+            rss_path.unlink(missing_ok=True)
+    if timed_out:
+        with open(log_path, "a", encoding="utf-8") as log_f:
+            log_f.write(f"\n<!> Error: Process timed out after {timeout_sec}s\n")
+        return 124, max_rss_kb, True
+    return rc, max_rss_kb, False
+
+
+def default_runner(
+    spec: RunSpec,
+    out_dir: Path,
+    log_path: Path,
+    sim_time_limit: Optional[str] = None,
+    timeout_sec: Optional[float] = None,
+) -> Tuple[int, int]:
+    """Run one OMNeT++ simulation and return (exit_code, max_rss_kb) via os.wait4."""
     time_override = f"'--sim-time-limit={sim_time_limit}' '--**.simTimeLimit={sim_time_limit}'" if sim_time_limit else ""
-    time_prefix = "/usr/bin/time -f 'MAX_RSS_KB=%M' " if Path("/usr/bin/time").exists() else ""
     cmd = (
         f"source {OMNETPP_ENV} && export INET_ROOT={INET_ROOT} && cd {SIM_DIR} && "
-        f"{time_prefix}"
         f"opp_run -n $INET_ROOT/src:../src:. -l $INET_ROOT/src/INET -l {MATRIXFACTORY_LIB} "
         f"-u Cmdenv -c {spec.config_name} -r {spec.run_number} omnetpp.ini "
         f"'--result-dir={out_dir.resolve()}' {time_override}"
     )
-    res = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True)
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    combined = (res.stdout or "") + "\n" + (res.stderr or "")
-    log_path.write_text(combined, encoding="utf-8")
-
-    max_rss = 0
-    for line in combined.splitlines():
-        if line.startswith("MAX_RSS_KB="):
-            try:
-                max_rss = int(line.split("=", 1)[1].strip())
-            except ValueError:
-                pass
-    if max_rss == 0:
-        import resource
-        max_rss = int(resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss)
+    rc, max_rss, _timed_out = run_subprocess_wait4(["bash", "-c", cmd], log_path, timeout_sec=timeout_sec)
+    combined = Path(log_path).read_text(encoding="utf-8", errors="replace")
     if "<!> Error" in combined or "cRuntimeError" in combined:
-        return (res.returncode or 1), max_rss
-    return res.returncode, max_rss
+        return (rc or 1), max_rss
+    return rc, max_rss
 
 
 def execute_run_with_retry(
@@ -416,16 +538,21 @@ def execute_run_with_retry(
     compress: bool = True,
     min_free_gb: float = 2.0,
     sim_time_limit: Optional[str] = None,
-    runner: Optional[Callable[[RunSpec, Path, Path, Optional[str]], Tuple[int, int]]] = None,
+    timeout_sec: Optional[float] = 3600.0,
+    git_head: Optional[str] = None,
+    git_dirty: Optional[bool] = None,
+    runner: Optional[Callable[..., Tuple[int, int]]] = None,
 ) -> Dict[str, object]:
     """Execute one RunSpec with resumability and at most 1 retry of the exact same run_number."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    existing = find_existing_valid_output(out_dir, spec)
+    existing = find_existing_valid_output(out_dir, spec, manifest_path=manifest_path, lib_sha256=lib_sha256)
     if existing is not None:
         return {"status": "skipped", "path": existing, "spec": spec}
 
-    run_fn = runner or default_runner
+    if git_head is None or git_dirty is None:
+        git_head, git_dirty = get_git_state()
+
     host = socket.gethostname()
     last_error: Optional[Exception] = None
 
@@ -439,7 +566,10 @@ def execute_run_with_retry(
         start_utc = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         t0 = time.monotonic()
         log_path = Path(log_dir) / f"{spec.config_name}_run{spec.run_number}_attempt{attempt}.log"
-        rc, max_rss_kb = run_fn(spec, out_dir, log_path, sim_time_limit)
+        if runner is not None:
+            rc, max_rss_kb = runner(spec, out_dir, log_path, sim_time_limit)
+        else:
+            rc, max_rss_kb = default_runner(spec, out_dir, log_path, sim_time_limit, timeout_sec=timeout_sec)
         wall_s = round(time.monotonic() - t0, 3)
         cleanup_auxiliary_files(out_dir, spec)
 
@@ -469,6 +599,8 @@ def execute_run_with_retry(
                 "sca_bytes": sca_bytes,
                 "sca_sha256": sca_hash,
                 "library_sha256": lib_sha256,
+                "git_head": git_head,
+                "git_dirty": int(bool(git_dirty)),
             }
             append_manifest_row(manifest_path, row)
             return {"status": "completed", "path": final_path, "row": row, "attempts": attempt}
@@ -491,6 +623,8 @@ def execute_run_with_retry(
                 "sca_bytes": 0,
                 "sca_sha256": "",
                 "library_sha256": lib_sha256,
+                "git_head": git_head,
+                "git_dirty": int(bool(git_dirty)),
             }
             append_manifest_row(manifest_path, fail_row)
             LOG.error(
@@ -552,7 +686,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     p.add_argument("--evidence-dir", default=str(Path(PROJECT_ROOT) / "evidence" / "05_campaign"),
                    help="directory for manifest.csv and per-run logs/")
     p.add_argument("--expected-lib-sha256", default=None,
-                   help="require libmatrixfactory.so to match this SHA-256 before launching")
+                   help="require libmatrixfactory.so to match this SHA-256 before launching (mandatory unless --allow-unpinned-lib)")
+    p.add_argument("--allow-unpinned-lib", action="store_true",
+                   help="allow launching without --expected-lib-sha256 (for exploratory/dev runs only)")
     p.add_argument("--workers", type=int, default=2,
                    help="concurrent worker processes (size from available RAM, default 2)")
     p.add_argument("--repeat", type=int, default=22,
@@ -561,12 +697,20 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                    help="optional cap on repetition index (e.g. 2 for quick tests)")
     p.add_argument("--dry-run-corners", action="store_true",
                    help="run only the 96-run Phase 5b corner grid (N in {5,80}, PHY in {54,12}, load in {2000us,300us}, 6 cells, 2 reps)")
+    p.add_argument("--namrs", default=None,
+                   help="optional comma-separated N_AMR filter (e.g. '20,40')")
+    p.add_argument("--phys", default=None,
+                   help="optional comma-separated PHY filter in Mbps (e.g. '12,54')")
+    p.add_argument("--tels", default=None,
+                   help="optional comma-separated telInterval filter (e.g. '2000us,300us')")
     p.add_argument("--shard", default=None,
                    help="slice-level shard 'i/M' (1-indexed, e.g. '1/3'); never splits a 6-cell slice")
     p.add_argument("--no-gzip", action="store_true",
                    help="keep plain .sca files instead of compressing to .sca.gz")
     p.add_argument("--min-free-gb", type=float, default=2.0,
                    help="halt campaign if free disk space on --out-dir falls below this GiB threshold")
+    p.add_argument("--timeout-sec", type=float, default=3600.0,
+                   help="per-run wall-clock timeout in seconds (default 3600)")
     p.add_argument("--sim-time-limit", default=None,
                    help="optional override for sim-time-limit (for testing only)")
     p.add_argument("--list-only", action="store_true",
@@ -575,8 +719,14 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
+    if not args.list_only and not args.allow_unpinned_lib and not args.expected_lib_sha256:
+        raise RuntimeError(
+            "Production launch requires --expected-lib-sha256 (or pass --allow-unpinned-lib for dev runs)"
+        )
+
     lib_sha = check_library_gate(expected_sha256=args.expected_lib_sha256)
-    LOG.info("Verified libmatrixfactory.so (SHA-256: %s)", lib_sha)
+    git_head, git_dirty = get_git_state()
+    LOG.info("Verified libmatrixfactory.so (SHA-256: %s, git_head: %s, dirty: %s)", lib_sha, git_head, git_dirty)
 
     all_specs: List[RunSpec] = []
     for c in CELLS:
@@ -585,9 +735,15 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     LOG.info("Enumerated %d total runs across %d cells", len(all_specs), len(CELLS))
 
     shard = parse_shard_arg(args.shard)
+    namrs = [int(x) for x in args.namrs.split(",") if x.strip()] if args.namrs else None
+    phys = [int(x) for x in args.phys.split(",") if x.strip()] if args.phys else None
+    tels = [x.strip() for x in args.tels.split(",") if x.strip()] if args.tels else None
     scheduled = order_runs_slice_major(
         all_specs,
         dry_run_corners=args.dry_run_corners,
+        namrs=namrs,
+        phys=phys,
+        tels=tels,
         max_reps=args.max_reps,
         shard=shard,
     )
@@ -615,6 +771,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 compress=not args.no_gzip,
                 min_free_gb=args.min_free_gb,
                 sim_time_limit=args.sim_time_limit,
+                timeout_sec=args.timeout_sec,
+                git_head=git_head,
+                git_dirty=git_dirty,
             )
             if res["status"] == "skipped":
                 skipped += 1
@@ -644,6 +803,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                     compress=not args.no_gzip,
                     min_free_gb=args.min_free_gb,
                     sim_time_limit=args.sim_time_limit,
+                    timeout_sec=args.timeout_sec,
+                    git_head=git_head,
+                    git_dirty=git_dirty,
                 ),
             )
             for res in slice_results:

@@ -9,11 +9,6 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-import sys
-
-# Avoid loading optional NumPy 1.x C-extensions (numexpr, bottleneck) when running under NumPy 2.x
-sys.modules.setdefault("numexpr", None)
-sys.modules.setdefault("bottleneck", None)
 
 import numpy as np
 import pandas as pd
@@ -24,6 +19,16 @@ import schedule_geometry as sg
 CONDITION = ["class", "N_AMR", "lambda_tel_Mbps", "phy_rate_Mbps"]
 # A point is near-structural when the schedule's worst-case wait is within 10% of the deadline.
 NEAR_STRUCTURAL_FRACTION = 0.9
+# A penalty flag needs a significant effect AND at least this size (1 point of miss rate), so a tiny but
+# statistically significant systematic difference (likely when replications are many or noise is small) is
+# not flagged. It does NOT remove chance flags: with no true effect and noisy replications, about 2% of points
+# still carry a one-sided penalty flag, because the chance effects are themselves larger than 1 point. Labels
+# are screening aids, not hypothesis tests; report the effect sizes and intervals.
+MIN_PRACTICAL_EFFECT = 0.01
+# A scheduled-radio penalty at a point the schedule has ample capacity for, where the geometry wait is well
+# below the deadline, has no known cause. That is how a MAC defect looks in the data (the stranded-frame
+# defect at N=5, 12 Mbps, Orders: utilization 0.15, 28% misses), so it is labelled for investigation.
+UNEXPLAINED_UTILIZATION = 0.5
 
 
 def _effect(values: np.ndarray) -> tuple[float, float]:
@@ -75,15 +80,19 @@ def build_contrasts(replications: pd.DataFrame, deadline_ms: int | None = None) 
         # gain and can make the point read as wired-dominated. Wired contrasts stay valid because
         # they difference cells that share the same radio regime.
         radio_penalty = False
-        tas_penalty = bool(np.isfinite(wired_ci) and wired_mean + wired_ci < 0)
+        tas_penalty = bool(np.isfinite(wired_ci) and wired_mean + wired_ci < 0
+                           and wired_mean <= -MIN_PRACTICAL_EFFECT)
         bound_ms = sg.worst_case_wait_ms(cls, int(n_amr), phy)
+        utilization = sg.scheduled_utilization(cls, int(n_amr), phy)
+        unexplained = False
         structural = bound_ms >= d_eval
         near_structural = (not structural) and bound_ms >= NEAR_STRUCTURAL_FRACTION * d_eval
         if structural:
             wireless_mean = wireless_ci = float("nan")
             difference_mean = difference_ci = float("nan")
             dominant = "structural_schedule_wait"
-        elif np.isfinite(wireless_ci) and wireless_mean + wireless_ci < 0:
+        elif (np.isfinite(wireless_ci) and wireless_mean + wireless_ci < 0
+              and wireless_mean <= -MIN_PRACTICAL_EFFECT):
             # Scheduled radio is significantly WORSE than CSMA (for example a capacity-limited
             # schedule: Orders at N=80, 12 Mbps runs at about 92% AP utilization). That is a real
             # wireless-side effect: keep the numbers and always set the flag. Relabel the point only
@@ -91,8 +100,9 @@ def build_contrasts(replications: pd.DataFrame, deadline_ms: int | None = None) 
             # saturated FIFO port) is not hidden behind a small radio penalty.
             radio_penalty = True
             wired_dominates = bool(np.isfinite(wired_ci) and (wired_mean - wired_ci) > abs(wireless_mean))
+            unexplained = (not near_structural) and utilization < UNEXPLAINED_UTILIZATION
             if not wired_dominates:
-                dominant = "scheduled_radio_penalty"
+                dominant = "unexplained_radio_penalty" if unexplained else "scheduled_radio_penalty"
         elif tas_penalty:
             # Wired TAS gating is significantly WORSE than FIFO (for example telemetry offered above
             # its 44.8 Mbps GCL allocation). Because wireless - wired turns positive when wired < 0,
@@ -117,7 +127,8 @@ def build_contrasts(replications: pd.DataFrame, deadline_ms: int | None = None) 
             "ci95_wireless_minus_wired": difference_ci,
             "dominant_bottleneck": dominant,
             "schedule_wait_bound_ms": bound_ms,
-            "schedule_utilization": sg.scheduled_utilization(cls, int(n_amr), phy),
+            "schedule_utilization": utilization,
+            "unexplained_radio_penalty_flag": bool(unexplained),
             "scheduled_radio_penalty_flag": radio_penalty,
             "wired_tas_penalty_flag": tas_penalty,
             "structural_tdma_exceeds_deadline": bool(structural),
