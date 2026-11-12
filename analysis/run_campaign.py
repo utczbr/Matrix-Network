@@ -17,6 +17,7 @@ Orchestrates the 6 x 1,760 = 10,560 factorial sweep runs across Cell1_Sweep..Cel
 from __future__ import annotations
 
 import argparse
+import atexit
 import csv
 import dataclasses
 import datetime as dt
@@ -75,6 +76,7 @@ MANIFEST_COLUMNS = [
     "sca_bytes",
     "sca_sha256",
     "library_sha256",
+    "config_sha256",
     "git_head",
     "git_dirty",
 ]
@@ -119,6 +121,23 @@ def sha256_file(path: Path) -> str:
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(65536), b""):
             h.update(chunk)
+    return h.hexdigest()
+
+
+def compute_config_sha256(repo_dir: Path = Path(PROJECT_ROOT)) -> str:
+    """Compute composite SHA-256 of simulations/omnetpp.ini, simulations/MatrixFactoryNetwork.ned, and src/*.ned."""
+    repo_dir = Path(repo_dir)
+    h = hashlib.sha256()
+    paths = [
+        repo_dir / "simulations" / "omnetpp.ini",
+        repo_dir / "simulations" / "MatrixFactoryNetwork.ned",
+        *sorted((repo_dir / "src").glob("*.ned")),
+    ]
+    for p in paths:
+        if p.exists():
+            rel = p.relative_to(repo_dir).as_posix().encode("utf-8")
+            h.update(rel + b"\0")
+            h.update(p.read_bytes() + b"\0")
     return h.hexdigest()
 
 
@@ -377,12 +396,59 @@ def compress_sca_file(sca_path: Path) -> Path:
 _MANIFEST_LOCK = threading.Lock()
 
 
-def manifest_has_matching_run(manifest_path: Path, spec: RunSpec, lib_sha256: str) -> bool:
-    """Return True iff manifest_path has a completed row (exit_code == 0) for spec with library_sha256 == lib_sha256."""
+class CampaignAborted(RuntimeError):
+    """The launcher was interrupted or terminated; in-flight runs were killed, not failed."""
+
+
+# Each simulation runs in its own session so a timeout can kill its whole process group. The cost is that a
+# terminal Ctrl-C or a plain `kill` no longer reaches it, so the launcher keeps a registry of live groups and
+# kills them itself when it is interrupted, terminated, or exits.
+_ABORT = threading.Event()
+_ACTIVE_PGIDS: set = set()
+_ACTIVE_LOCK = threading.Lock()
+
+
+def _kill_group(pgid: int) -> bool:
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+        return True
+    except ProcessLookupError:
+        return False
+
+
+def abort_all_runs() -> int:
+    """Stop starting attempts and SIGKILL every live simulation process group. Returns how many were signalled."""
+    _ABORT.set()
+    with _ACTIVE_LOCK:
+        pgids = list(_ACTIVE_PGIDS)
+    return sum(1 for pg in pgids if _kill_group(pg))
+
+
+def reset_abort_state() -> None:
+    _ABORT.clear()
+    with _ACTIVE_LOCK:
+        _ACTIVE_PGIDS.clear()
+
+
+def _raise_exit_on_signal(signum, _frame) -> None:
+    raise SystemExit(128 + int(signum))
+
+
+atexit.register(abort_all_runs)
+
+
+def manifest_has_matching_run(
+    manifest_path: Path,
+    spec: RunSpec,
+    lib_sha256: str,
+    config_sha256: Optional[str] = None,
+) -> bool:
+    """Return True iff manifest_path has a completed row (exit_code == 0) matching lib_sha256 and config_sha256."""
     manifest_path = Path(manifest_path)
     if not manifest_path.exists() or manifest_path.stat().st_size == 0:
         return False
-    expected = lib_sha256.strip().lower()
+    expected_lib = lib_sha256.strip().lower()
+    expected_cfg = config_sha256.strip().lower() if config_sha256 is not None else None
     matched = False
     with _MANIFEST_LOCK:
         with open(manifest_path, "r", newline="", encoding="utf-8") as f:
@@ -391,8 +457,14 @@ def manifest_has_matching_run(manifest_path: Path, spec: RunSpec, lib_sha256: st
                 try:
                     if int(row.get("cell", -1)) == spec.cell and int(row.get("run_number", -1)) == spec.run_number:
                         if int(row.get("exit_code", 1)) == 0:
-                            actual = str(row.get("library_sha256", "")).strip().lower()
-                            matched = bool(actual) and (actual == expected)
+                            actual_lib = str(row.get("library_sha256", "")).strip().lower()
+                            lib_ok = bool(actual_lib) and (actual_lib == expected_lib)
+                            if expected_cfg is not None:
+                                actual_cfg = str(row.get("config_sha256", "")).strip().lower()
+                                cfg_ok = bool(actual_cfg) and (actual_cfg == expected_cfg)
+                            else:
+                                cfg_ok = True
+                            matched = lib_ok and cfg_ok
                 except ValueError:
                     continue
     return matched
@@ -403,14 +475,17 @@ def find_existing_valid_output(
     spec: RunSpec,
     manifest_path: Optional[Path] = None,
     lib_sha256: Optional[str] = None,
+    config_sha256: Optional[str] = None,
 ) -> Optional[Path]:
-    """Return the existing .sca.gz or .sca path if present, valid, and matching manifest library_sha256."""
+    """Return the existing .sca.gz or .sca path if present, valid, and matching manifest library/config hashes."""
     gz_path = spec.sca_gz_path(out_dir)
     sca_path = spec.sca_path(out_dir)
     if manifest_path is not None and lib_sha256 is not None:
-        if (gz_path.exists() or sca_path.exists()) and not manifest_has_matching_run(manifest_path, spec, lib_sha256):
+        if (gz_path.exists() or sca_path.exists()) and not manifest_has_matching_run(
+            manifest_path, spec, lib_sha256, config_sha256=config_sha256
+        ):
             LOG.warning(
-                "Rejecting existing output for %s run %d: missing or mismatched library_sha256 in %s",
+                "Rejecting existing output for %s run %d: missing or mismatched library/config SHA-256 in %s",
                 spec.config_name,
                 spec.run_number,
                 manifest_path,
@@ -472,6 +547,10 @@ def run_subprocess_wait4(
             stderr=subprocess.STDOUT,
             start_new_session=True,
         )
+        with _ACTIVE_LOCK:
+            _ACTIVE_PGIDS.add(proc.pid)
+        if _ABORT.is_set():  # abort arrived between the attempt check and the spawn
+            _kill_group(proc.pid)
 
         def _on_timeout() -> None:
             nonlocal timed_out
@@ -487,9 +566,14 @@ def run_subprocess_wait4(
             timer.start()
         try:
             _, status, rusage = os.wait4(proc.pid, 0)
+        except BaseException:
+            _kill_group(proc.pid)  # interrupted while waiting: do not leave the simulation running
+            raise
         finally:
             if timer is not None:
                 timer.cancel()
+            with _ACTIVE_LOCK:
+                _ACTIVE_PGIDS.discard(proc.pid)
         rc = os.waitstatus_to_exitcode(status)
         proc.returncode = rc
         max_rss_kb = int(rusage.ru_maxrss)
@@ -535,6 +619,7 @@ def execute_run_with_retry(
     manifest_path: Path,
     log_dir: Path,
     lib_sha256: str,
+    config_sha256: Optional[str] = None,
     compress: bool = True,
     min_free_gb: float = 2.0,
     sim_time_limit: Optional[str] = None,
@@ -546,7 +631,11 @@ def execute_run_with_retry(
     """Execute one RunSpec with resumability and at most 1 retry of the exact same run_number."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    existing = find_existing_valid_output(out_dir, spec, manifest_path=manifest_path, lib_sha256=lib_sha256)
+    if config_sha256 is None:
+        config_sha256 = compute_config_sha256()
+    existing = find_existing_valid_output(
+        out_dir, spec, manifest_path=manifest_path, lib_sha256=lib_sha256, config_sha256=config_sha256
+    )
     if existing is not None:
         return {"status": "skipped", "path": existing, "spec": spec}
 
@@ -557,6 +646,8 @@ def execute_run_with_retry(
     last_error: Optional[Exception] = None
 
     for attempt in (1, 2):
+        if _ABORT.is_set():
+            raise CampaignAborted(f"campaign aborted before {spec.config_name} run {spec.run_number}")
         check_disk_space(out_dir, min_free_gb=min_free_gb)
         # Clean any stale partial files before starting the attempt
         spec.sca_path(out_dir).unlink(missing_ok=True)
@@ -572,6 +663,10 @@ def execute_run_with_retry(
             rc, max_rss_kb = default_runner(spec, out_dir, log_path, sim_time_limit, timeout_sec=timeout_sec)
         wall_s = round(time.monotonic() - t0, 3)
         cleanup_auxiliary_files(out_dir, spec)
+        if _ABORT.is_set():  # killed by us, not a real failure: no failure row, no retry
+            spec.sca_path(out_dir).unlink(missing_ok=True)
+            spec.sca_gz_path(out_dir).unlink(missing_ok=True)
+            raise CampaignAborted(f"{spec.config_name} run {spec.run_number} killed by abort")
 
         sca_path = spec.sca_path(out_dir)
         try:
@@ -599,6 +694,7 @@ def execute_run_with_retry(
                 "sca_bytes": sca_bytes,
                 "sca_sha256": sca_hash,
                 "library_sha256": lib_sha256,
+                "config_sha256": config_sha256,
                 "git_head": git_head,
                 "git_dirty": int(bool(git_dirty)),
             }
@@ -623,6 +719,7 @@ def execute_run_with_retry(
                 "sca_bytes": 0,
                 "sca_sha256": "",
                 "library_sha256": lib_sha256,
+                "config_sha256": config_sha256,
                 "git_head": git_head,
                 "git_dirty": int(bool(git_dirty)),
             }
@@ -660,7 +757,9 @@ def run_slice_parallel(
         futs = [pool.submit(run_one, spec) for spec in slice_specs]
         for fut in as_completed(futs):
             results.append(fut.result())
-    except BaseException:
+    except BaseException as exc:
+        if isinstance(exc, (KeyboardInterrupt, SystemExit, CampaignAborted)):
+            abort_all_runs()  # interrupted: stop in-flight runs too, instead of waiting out a 20 minute run
         pool.shutdown(wait=True, cancel_futures=True)
         raise
     pool.shutdown(wait=True)
@@ -689,6 +788,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                    help="require libmatrixfactory.so to match this SHA-256 before launching (mandatory unless --allow-unpinned-lib)")
     p.add_argument("--allow-unpinned-lib", action="store_true",
                    help="allow launching without --expected-lib-sha256 (for exploratory/dev runs only)")
+    p.add_argument("--allow-dirty", action="store_true",
+                   help="allow a production launch (--expected-lib-sha256) from a working tree with uncommitted changes")
     p.add_argument("--workers", type=int, default=2,
                    help="concurrent worker processes (size from available RAM, default 2)")
     p.add_argument("--repeat", type=int, default=22,
@@ -725,8 +826,24 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         )
 
     lib_sha = check_library_gate(expected_sha256=args.expected_lib_sha256)
+    cfg_sha = compute_config_sha256()
     git_head, git_dirty = get_git_state()
-    LOG.info("Verified libmatrixfactory.so (SHA-256: %s, git_head: %s, dirty: %s)", lib_sha, git_head, git_dirty)
+    LOG.info(
+        "Verified libmatrixfactory.so (SHA-256: %s, config_sha256: %s, git_head: %s, dirty: %s)",
+        lib_sha,
+        cfg_sha,
+        git_head,
+        git_dirty,
+    )
+    if git_dirty and args.expected_lib_sha256 and not args.allow_dirty and not args.list_only:
+        raise RuntimeError(
+            "Working tree has uncommitted changes. A pinned (production) launch must run from a clean, committed "
+            "tree (commit-freeze rule); commit first, or pass --allow-dirty and record why.")
+    try:
+        signal.signal(signal.SIGTERM, _raise_exit_on_signal)  # so `kill` and service managers also clean up
+    except ValueError:  # not the main thread (tests)
+        pass
+    _ABORT.clear()
 
     all_specs: List[RunSpec] = []
     for c in CELLS:
@@ -768,6 +885,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 manifest_path=manifest_path,
                 log_dir=log_dir,
                 lib_sha256=lib_sha,
+                config_sha256=cfg_sha,
                 compress=not args.no_gzip,
                 min_free_gb=args.min_free_gb,
                 sim_time_limit=args.sim_time_limit,

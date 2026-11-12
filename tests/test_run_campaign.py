@@ -379,3 +379,41 @@ def test_main_requires_expected_lib_sha256_unless_explicitly_unpinned():
     with pytest.raises(RuntimeError, match="requires --expected-lib-sha256"):
         rc.main([])
 
+
+def test_resume_rejects_output_when_config_sha256_changes(tmp_path):
+    spec = rc.RunSpec(2, 42, 80, 12, "300us", 0)
+    out_dir = tmp_path / "campaign"
+    manifest = tmp_path / "evidence" / "manifest.csv"
+    logs = tmp_path / "evidence" / "logs"
+    calls = []
+
+    def fake_runner(s, odir, log_path, _sim_limit):
+        calls.append(s.run_number)
+        write_valid_sca(s.sca_path(odir), s)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text("ok\n")
+        return 0, 10_000
+
+    res1 = rc.execute_run_with_retry(
+        spec, out_dir=out_dir, manifest_path=manifest, log_dir=logs,
+        lib_sha256="lib_v1", config_sha256="cfg_v1", runner=fake_runner,
+    )
+    assert res1["status"] == "completed" and calls == [42]
+
+    # Same library and config hash -> skipped
+    res2 = rc.execute_run_with_retry(
+        spec, out_dir=out_dir, manifest_path=manifest, log_dir=logs,
+        lib_sha256="lib_v1", config_sha256="cfg_v1", runner=fake_runner,
+    )
+    assert res2["status"] == "skipped" and calls == [42]
+
+    # Same library hash, changed config hash -> re-runs
+    res3 = rc.execute_run_with_retry(
+        spec, out_dir=out_dir, manifest_path=manifest, log_dir=logs,
+        lib_sha256="lib_v1", config_sha256="cfg_v2", runner=fake_runner,
+    )
+    assert res3["status"] == "completed" and calls == [42, 42]
+    df_m = pd.read_csv(manifest)
+    assert list(df_m["config_sha256"]) == ["cfg_v1", "cfg_v2"]
+
+
