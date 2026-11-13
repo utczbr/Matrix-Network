@@ -234,7 +234,7 @@ Following `traffic_class_evidence_matrix.md`, every traffic class and protocol a
 
 | Parameter | Configuration | Mode / Mechanism | Baseline Value | Status | Rationale & Target |
 | :--- | :--- | :--- | :--- | :---: | :--- |
-| **CSMA/CA** | `[Config Radio_CSMA]` (Cell 1, 3, 5) | Standard IEEE 802.11 DCF | Default | Decision | Baseline contention access. |
+| **CSMA/CA** | `[Config Radio_CSMA]` (Cell 1, 3, 5) | Standard IEEE 802.11 DCF; `sameTransmissionStartTimeCheck = "ignore"` | Default + `"ignore"` | Decision | INET examples (`throughput/omnetpp.ini`, `Ieee80211_*.test`) | Baseline contention access; allows physical backoff-0 simultaneous CSMA starts while preserving `"error"` in `[Config Radio_Sched]` as a TDMA overlap invariant. |
 | **Scheduled MAC Typename**| `[Config Radio_Sched]` (Cell 2, 4, 6) | `ScheduledDcf` | `ScheduledDcf` | Implemented; acceptance passed | Uses explicit time offsets and direction-specific slot widths; the 10 s nominal and worst-case acceptance points pass. |
 | **Slot Duration** | `slotDuration` | 54 Mbps: 400 µs both directions; 12 Mbps: 850 µs State, 560 µs Orders | µs | Decision | Required exchanges are 260/200 µs at 54 Mbps and 820/550 µs at 12 Mbps. |
 | **Superframe Duration** | `superframeDuration` | 54 Mbps: 3, 5, 9, 20, 48 ms; 12 Mbps: 6, 10, 20, 42, 90 ms | ms | Decision | Per-flow service remains at or above offered load; N=80 does not exceed the 90 ms minimum State interarrival. |

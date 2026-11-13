@@ -551,6 +551,7 @@ $$\text{Schema: } (\text{cell},\, \text{class},\, N_{\text{AMR}},\, \lambda_{\te
 * [x] §6 DDS Flow Matrix: Locked Option 7B direct-to-FMS routing (`station[i] -> fms` on UDP port 5100) across the contended `tsnSwitch -> fms` port (Q7).
 * [x] §8 Buffer & Framing: Added 70 B tagged vs. 66 B stripped framing note.
 * [x] §9 TAS Phase Offset: Locked `0us` canonical reference phase; documented multi-AMR slot-to-GCL phase dispersion ($\gcd(400,1000)=200\ \mu\text{s}$, $\gcd(850,1000)=50\ \mu\text{s}$) and $\le 800\ \mu\text{s}$ bounded gate wait (checklist C6).
+* [x] §9 CSMA Simultaneous Transmission Guard: Set `*.radioMedium.sameTransmissionStartTimeCheck = "ignore"` in `[Config Radio_CSMA]` (`N=80, 12 Mbps, Cell 5 rep=14` caught legitimate backoff-0 CSMA slot collisions at `t=51.31687s`; verified clean completion to `60s` with exact integer conservation while keeping `"error"` in `[Config Radio_Sched]`).
 * [x] Updated Implementation Guide citations from §5.1 to Step 5.1.
 
 ### 2. `docs/capacity.md`
