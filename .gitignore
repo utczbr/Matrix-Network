@@ -3,6 +3,8 @@ results/*
 !results/.gitkeep
 simulations/results/*
 !simulations/results/.gitkeep
+evidence/*
+!evidence/.gitkeep
 out/
 *.sca
 *.vec
