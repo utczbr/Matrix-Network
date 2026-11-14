@@ -1,0 +1,6 @@
+bash: linha 1: opp_run: comando não encontrado
+g++ (Debian 12.2.0-14+deb12u1) 12.2.0
+Copyright (C) 2022 Free Software Foundation, Inc.
+Python 3.11.2
+Python 3.11.2
+libjemalloc2=5.3.0-1

@@ -35,14 +35,20 @@ No production campaign result is currently claimed. Historical pilot numbers pri
 - Tier A (`[General]` `packetNameFormat = "pkt"`, 7-key `@statistic` whitelist
   preceding `**.statistic-recording = false`, `**.bin-recording = false`,
   `**.vector-recording = false`, `**.scalar-recording = true`, and
-  `**.eth[*].phyLayer.interFrameGapInserter.duration = 0.96us`) and Tier B
-  (`jemalloc 5.3.0-1` `LD_PRELOAD` in `analysis/run_campaign.py` with manifest
-  provenance) deliver a `2.257×` total (`2.372×` mean paired) speedup and reduce
-  peak single-worker RSS from `238.56 MiB` to `183.47 MiB` while keeping
-  `libmatrixfactory.so` (`63dd72db2c65…`) unchanged and all `192/192` dry-run
-  pairs (`simulations/results/dry_run_opt`, `evidence/05_dry_run_opt`) and all 7
-  exported tables bit-for-bit identical (`0` mismatches across `688,320`
-  required scalars, `771,744` optimized scalars, and `369,264` statistic fields).
+  `**.eth[*].phyLayer.interFrameGapInserter.duration = 0.96us`, guarded by
+  `check_no_production_recording_overrides()`) and Tier B
+  (`jemalloc 5.3.0-1` `LD_PRELOAD` enforced via `--expected-jemalloc-sha256`
+  and `validate_manifest_consistency()` in `analysis/run_campaign.py`) deliver a
+  `2.257×` total (`2.372×` mean paired) speedup and `-27.09 MiB` (`-13.77%`)
+  paired mean RSS reduction (`172.74 -> 145.65 MiB`; peak `238.56 -> 183.47 MiB`,
+  with `+1.06 MiB` mean rise at `N=5, 2000us` and `-54.87 / -73.88 MiB` at
+  `N=80`) while keeping `libmatrixfactory.so` (`63dd72db2c65…`) unchanged
+  (deferred Tier C archived unapplied at [`docs/patches/speedup_bit_identical.patch`](patches/speedup_bit_identical.patch))
+  and all `192/192` dry-run pairs (`simulations/results/dry_run_opt`,
+  `evidence/05_dry_run_opt`) and all 7 exported tables bit-for-bit identical
+  (`0` mismatches across `688,320` required scalars, `771,744` optimized scalars,
+  and `369,264` statistic fields; digests in `evidence/DIGESTS.sha256` and
+  gate log in `evidence/LEDGER.md`).
 
 ## Evidence available in this workspace
 

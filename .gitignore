@@ -37,6 +37,34 @@ __pycache__/
 htmlcov/
 .ipynb_checkpoints/
 *.log
+# Reviewable evidence, environment lock, gate logs, manifests, equivalence report, and compact lookup CSVs
+# (large lookup_ecdf.json, per-run simulation logs, and evidence/05_campaign/ stay ignored so campaign runs keep git_dirty=False)
+!evidence/LEDGER.md
+!evidence/DIGESTS.sha256
+!evidence/00_env/
+!evidence/00_env/*
+!evidence/01_build/
+!evidence/01_build/*
+!evidence/02_acceptance/
+!evidence/02_acceptance/*
+!evidence/04_pilot_extended/
+evidence/04_pilot_extended/*
+!evidence/04_pilot_extended/manifest.csv
+!evidence/05_dry_run/
+evidence/05_dry_run/*
+!evidence/05_dry_run/manifest.csv
+!evidence/05_dry_run/lookup/
+evidence/05_dry_run/lookup/*
+!evidence/05_dry_run/lookup/*.csv
+!evidence/05_dry_run/lookup/lookup_summary.json
+!evidence/05_dry_run_opt/
+evidence/05_dry_run_opt/*
+!evidence/05_dry_run_opt/manifest.csv
+!evidence/05_dry_run_opt/equivalence_report.json
+!evidence/05_dry_run_opt/lookup/
+evidence/05_dry_run_opt/lookup/*
+!evidence/05_dry_run_opt/lookup/*.csv
+!evidence/05_dry_run_opt/lookup/lookup_summary.json
 
 # IDE & Editor files
 .vscode/

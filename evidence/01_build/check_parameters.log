@@ -1,0 +1,26 @@
+[*] Checking simulations/omnetpp.ini against docs/parameters.md...
+  [+] Verified [General] sim-time-limit = 60s
+  [+] Verified [General] warmup-period = 5s
+  [+] Verified [General] num-rngs = 3
+  [+] Verified [Sweep] repeat = 22
+  [+] Verified [Point] *.numAmrs = ${nAmr=10}
+  [+] Verified [Sweep] *.numAmrs = ${nAmr=5, 10, 20, 40, 80}
+  [+] Verified [Sweep] *.wirelessPhyRate = ${phyRate=54Mbps, 12Mbps}
+  [+] Verified [General] *.amr[*].app[0].source.packetLength = 1000B
+  [+] Verified [General] *.fms.app[3..].source.packetLength = 600B
+  [+] Verified [General] *.station[*].app[0].source.packetLength = 200B
+  [+] Verified [General] *.station[*].app[1].source.packetLength = 1400B
+  [+] Verified [General] **.app[*].source.packetNameFormat = "pkt"
+  [+] Verified [General] **.statistic-recording = false
+  [+] Verified [General] **.bin-recording = false
+  [+] Verified [General] **.vector-recording = false
+  [+] Verified [General] **.scalar-recording = true
+  [+] Verified [General] **.eth[*].phyLayer.interFrameGapInserter.duration = 0.96us
+  [+] Verified [Wired_FIFO] **.tsnSwitch.eth[*].macLayer.queue.packetCapacity = 80
+  [+] Verified [Wired_Prio] **.tsnSwitch.eth[*].macLayer.queue.queue[*].packetCapacity = 20
+  [+] Verified [Wired_TAS] **.tsnSwitch.eth[*].macLayer.queue.queue[*].packetCapacity = 20
+  [+] Verified 7-key @statistic whitelist precedes **.statistic-recording = false in [General]
+  [+] Verified no non-Debug section or duplicate/wildcard [General] entry overrides recording controls
+  [+] Verified wired IFG consistency: 3 NED EthernetLink connections at 100Mbps match 96b / 100Mbps = 0.96us
+  [+] Verified 5-part characterization structure, evidence labels and Item 6/7 attribution
+[✓] Consistency check passed: all checked baseline parameters are documented in docs/parameters.md.

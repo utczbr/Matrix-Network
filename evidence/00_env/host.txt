@@ -1,0 +1,12 @@
+Linux debian 6.1.0-52-amd64 #1 SMP PREEMPT_DYNAMIC Debian 6.1.180-1 (2026-08-03) x86_64 GNU/Linux
+CPU(s):                                    4
+Lista de CPU(s) on-line:                   0-3
+Nome do modelo:                            Intel(R) Core(TM) i5-4460  CPU @ 3.20GHz
+Thread(s) per núcleo:                      1
+CPU(s) scaling MHz:                        94%
+CPU(s) de nó0 NUMA:                        0-3
+               total       usada       livre    compart.  buff/cache  disponível
+Mem.:          7,4Gi       4,9Gi       506Mi       239Mi       2,6Gi       2,5Gi
+Swap:           14Gi       3,0Gi        11Gi
+Sist. Arq.      Tam. Usado Disp. Uso% Montado em
+/dev/sda3       194G  148G   36G  81% /

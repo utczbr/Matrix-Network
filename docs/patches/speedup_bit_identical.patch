@@ -1,0 +1,381 @@
+diff --git a/src/DeadlineSink.cc b/src/DeadlineSink.cc
+index 99ca4d7..fb1b795 100644
+--- a/src/DeadlineSink.cc
++++ b/src/DeadlineSink.cc
+@@ -79,11 +79,16 @@ int64_t DeadlineSink::computeConsumptionTickRaw(int64_t gRaw, int64_t leadRaw, i
+ 
+ simtime_t DeadlineSink::extractCreationTime(const Packet *packet)
+ {
+-    const auto expTags = packet->getAllRegionTags<ExperimentPacketTag>();
+-    if (!expTags.empty() && expTags.front().getTag()->getGenerationTime() >= SIMTIME_ZERO) {
+-        return expTags.front().getTag()->getGenerationTime();
++    const int n = packet->getNumRegionTags();
++    for (int i = 0; i < n; ++i) {
++        const auto& tag = packet->getRegionTag(i);
++        if (typeid(*tag) == typeid(ExperimentPacketTag)) {
++            const auto expTag = staticPtrCast<const ExperimentPacketTag>(tag);
++            if (expTag->getGenerationTime() >= SIMTIME_ZERO)
++                return expTag->getGenerationTime();
++        }
+     }
+-    for (int i = 0; i < packet->getNumRegionTags(); ++i) {
++    for (int i = 0; i < n; ++i) {
+         auto tag = packet->getRegionTag(i);
+         if (auto creationTag = dynamicPtrCast<const CreationTimeTag>(tag)) {
+             return creationTag->getCreationTime();
+@@ -94,10 +99,17 @@ simtime_t DeadlineSink::extractCreationTime(const Packet *packet)
+ 
+ void DeadlineSink::recordDomainBreakdown(const Packet *packet, simtime_t generationTime, simtime_t arrivalTime)
+ {
+-    const auto tags = packet->getAllRegionTags<ExperimentPacketTag>();
+-    if (tags.empty())
++    Ptr<const ExperimentPacketTag> tag = nullptr;
++    const int n = packet->getNumRegionTags();
++    for (int i = 0; i < n; ++i) {
++        const auto& t = packet->getRegionTag(i);
++        if (typeid(*t) == typeid(ExperimentPacketTag)) {
++            tag = staticPtrCast<const ExperimentPacketTag>(t);
++            break;
++        }
++    }
++    if (tag == nullptr)
+         throw cRuntimeError("DeadlineSink: application packet arrived without ExperimentPacketTag");
+-    const auto tag = tags.front().getTag();
+     if (tag->getTrafficClass() != trafficClass)
+         throw cRuntimeError("DeadlineSink: packet class '%s' arrived at '%s' sink",
+             tag->getTrafficClass(), trafficClass.c_str());
+@@ -162,10 +174,18 @@ void DeadlineSink::consumePacket(Packet *packet)
+     nValidDelivered++;
+     e2eDelayHist.collect(tauMs);
+     deliveredDelaysMs.push_back(tauMs);
+-    const auto experimentTags = packet->getAllRegionTags<ExperimentPacketTag>();
+-    if (experimentTags.empty() || !experimentTags.front().getTag()->getValidForMetrics())
++    Ptr<const ExperimentPacketTag> expTag = nullptr;
++    const int nTags = packet->getNumRegionTags();
++    for (int i = 0; i < nTags; ++i) {
++        const auto& t = packet->getRegionTag(i);
++        if (typeid(*t) == typeid(ExperimentPacketTag)) {
++            expTag = staticPtrCast<const ExperimentPacketTag>(t);
++            break;
++        }
++    }
++    if (expTag == nullptr || !expTag->getValidForMetrics())
+         throw cRuntimeError("DeadlineSink: delivered sample disagrees with the coordinator validity filter");
+-    experimentCoordinator->markDelivered(experimentTags.front().getTag()->getPacketId(), tauMs);
++    experimentCoordinator->markDelivered(expTag->getPacketId(), tauMs);
+     recordDomainBreakdown(packet, gSim, aSim);
+ 
+     // 3. Nominal Deadline Evaluation (Tier 1 D_c)
+diff --git a/src/ExperimentCoordinator.cc b/src/ExperimentCoordinator.cc
+index 1c7197e..2921a7f 100644
+--- a/src/ExperimentCoordinator.cc
++++ b/src/ExperimentCoordinator.cc
+@@ -49,8 +49,13 @@ int ExperimentCoordinator::classIndexFromSource(const char *path)
+ 
+ Ptr<const ExperimentPacketTag> ExperimentCoordinator::findTag(const Packet *packet)
+ {
+-    const auto tags = packet->getAllRegionTags<ExperimentPacketTag>();
+-    return tags.empty() ? nullptr : tags.front().getTag();
++    const int n = packet->getNumRegionTags();
++    for (int i = 0; i < n; ++i) {
++        const auto& tag = packet->getRegionTag(i);
++        if (typeid(*tag) == typeid(ExperimentPacketTag))
++            return staticPtrCast<const ExperimentPacketTag>(tag);
++    }
++    return nullptr;
+ }
+ 
+ void ExperimentCoordinator::updateDomainTag(Packet *packet, const std::function<void(const Ptr<ExperimentPacketTag>&)>& update)
+@@ -62,32 +67,65 @@ void ExperimentCoordinator::updateDomainTag(Packet *packet, const std::function<
+ void ExperimentCoordinator::initialize(int stage)
+ {
+     cSimpleModule::initialize(stage);
+-    if (stage != INITSTAGE_LOCAL)
+-        return;
+-
+-    warmupTime = par("warmupTime");
+-    simTimeLimit = par("simTimeLimit");
+-    horizonLeadTime = par("horizonLeadTime");
+-    const bool randomize = par("randomizeTickPhase");
+-    const int rngIndex = par("phaseRngIndex");
+-    for (size_t i = 0; i < NUM_TICK_PERIODS; ++i) {
+-        const simtime_t period = SimTime(TICK_PERIODS_MS[i], SIMTIME_MS);
+-        tickPeriodRaw[i] = period.raw();
+-        tickPhaseRaw[i] = randomize ? SimTime(uniform(0.0, period.dbl(), rngIndex)).raw() : 0;
++    if (stage == INITSTAGE_LOCAL) {
++        warmupTime = par("warmupTime");
++        simTimeLimit = par("simTimeLimit");
++        horizonLeadTime = par("horizonLeadTime");
++        const bool randomize = par("randomizeTickPhase");
++        const int rngIndex = par("phaseRngIndex");
++        for (size_t i = 0; i < NUM_TICK_PERIODS; ++i) {
++            const simtime_t period = SimTime(TICK_PERIODS_MS[i], SIMTIME_MS);
++            tickPeriodRaw[i] = period.raw();
++            tickPhaseRaw[i] = randomize ? SimTime(uniform(0.0, period.dbl(), rngIndex)).raw() : 0;
++        }
++        validPackets.reserve(262144);
++        for (auto& delays : deliveredDelaysMs)
++            delays.reserve(65536);
++    }
++    else if (stage == INITSTAGE_LAST) {
++        const int maxId = getSimulation()->getLastComponentId();
++        sourceClassById.assign(maxId + 1, -1);
++        queueRoleById.assign(maxId + 1, QUEUE_NONE);
++        for (int id = 0; id <= maxId; ++id) {
++            cModule *mod = getSimulation()->getModule(id);
++            if (mod == nullptr)
++                continue;
++            const std::string path = mod->getFullPath();
++            const int cls = classIndexFromSource(path.c_str());
++            if (cls >= 0) {
++                sourceClassById[id] = static_cast<int8_t>(cls);
++                if (mod->isSimple())
++                    mod->subscribe(packetCreatedSignal, this);
++            }
++            if (path.find(".tsnSwitch.eth[") != std::string::npos && path.find(".macLayer.queue") != std::string::npos) {
++                queueRoleById[id] = QUEUE_SWITCH;
++                if (mod->isSimple()) {
++                    mod->subscribe(packetPushStartedSignal, this);
++                    mod->subscribe(packetPulledSignal, this);
++                }
++            }
++            else if (path.find(".ap.eth[") != std::string::npos && path.find(".queue") != std::string::npos) {
++                queueRoleById[id] = QUEUE_AP_ETH;
++                if (mod->isSimple())
++                    mod->subscribe(packetPushStartedSignal, this);
++            }
++            else if (path.find(".ap.wlan[") != std::string::npos && path.find(".pendingQueue") != std::string::npos) {
++                queueRoleById[id] = QUEUE_AP_WLAN_PENDING;
++                if (mod->isSimple())
++                    mod->subscribe(packetPushStartedSignal, this);
++            }
++        }
++        auto root = getSimulation()->getSystemModule();
++        root->subscribe(packetDroppedSignal, this);
+     }
+-
+-    auto root = getSimulation()->getSystemModule();
+-    root->subscribe(packetCreatedSignal, this);
+-    // PacketQueue emits packetPushStarted/packetPulled. packetPushed is emitted
+-    // by sources, classifiers, and sinks, but not by the queue itself.
+-    root->subscribe(packetPushStartedSignal, this);
+-    root->subscribe(packetPulledSignal, this);
+-    root->subscribe(packetDroppedSignal, this);
+ }
+ 
+ void ExperimentCoordinator::handlePacketCreated(cComponent *source, Packet *packet)
+ {
+-    const int classIndex = classIndexFromSource(source->getFullPath().c_str());
++    const int id = source->getId();
++    const int classIndex = (id >= 0 && static_cast<size_t>(id) < sourceClassById.size())
++        ? sourceClassById[id]
++        : classIndexFromSource(source->getFullPath().c_str());
+     if (classIndex < 0)
+         return;
+ 
+@@ -116,46 +154,59 @@ void ExperimentCoordinator::handlePacketCreated(cComponent *source, Packet *pack
+     tag->setGenerationTime(simTime());
+     if (valid) {
+         generatedValid[classIndex]++;
+-        validPackets.emplace(packetId, PacketRecord{classIndex, PENDING});
++        validPackets.push_back(PacketRecord{classIndex, PENDING});
++    }
++    else {
++        validPackets.push_back(PacketRecord{-1, PENDING});
+     }
+ }
+ 
+ void ExperimentCoordinator::handleQueueEvent(cComponent *source, Packet *packet, bool pushed)
+ {
+-    if (findTag(packet) == nullptr)
++    const int id = source->getId();
++    uint8_t role = QUEUE_NONE;
++    if (id >= 0 && static_cast<size_t>(id) < queueRoleById.size()) {
++        role = queueRoleById[id];
++    }
++    else {
++        const std::string path = source->getFullPath();
++        if (path.find(".tsnSwitch.eth[") != std::string::npos && path.find(".macLayer.queue") != std::string::npos)
++            role = QUEUE_SWITCH;
++        else if (path.find(".ap.eth[") != std::string::npos && path.find(".queue") != std::string::npos)
++            role = QUEUE_AP_ETH;
++        else if (path.find(".ap.wlan[") != std::string::npos && path.find(".pendingQueue") != std::string::npos)
++            role = QUEUE_AP_WLAN_PENDING;
++    }
++    if (role == QUEUE_NONE)
++        return;
++
++    const auto tag = findTag(packet);
++    if (tag == nullptr)
+         return;
+-    const std::string path = source->getFullPath();
+ 
+-    if (path.find(".tsnSwitch.eth[") != std::string::npos && path.find(".macLayer.queue") != std::string::npos) {
+-        updateDomainTag(packet, [&] (const Ptr<ExperimentPacketTag>& tag) {
+-            if (pushed && tag->getSwitchQueueArrivalTime() < SIMTIME_ZERO)
+-                tag->setSwitchQueueArrivalTime(simTime());
+-            else if (!pushed && tag->getSwitchQueueArrivalTime() >= SIMTIME_ZERO)
+-                tag->setSwitchQueueDepartureTime(simTime());
++    if (role == QUEUE_SWITCH) {
++        updateDomainTag(packet, [&] (const Ptr<ExperimentPacketTag>& mutableTag) {
++            if (pushed && mutableTag->getSwitchQueueArrivalTime() < SIMTIME_ZERO)
++                mutableTag->setSwitchQueueArrivalTime(simTime());
++            else if (!pushed && mutableTag->getSwitchQueueArrivalTime() >= SIMTIME_ZERO)
++                mutableTag->setSwitchQueueDepartureTime(simTime());
+         });
++        return;
+     }
+ 
+-    const auto tag = findTag(packet);
+-    if (!pushed || tag == nullptr || tag->getApBoundaryTime() >= SIMTIME_ZERO)
++    if (!pushed || tag->getApBoundaryTime() >= SIMTIME_ZERO)
+         return;
+-    const std::string trafficClass = tag->getTrafficClass();
++    const char *trafficClass = tag->getTrafficClass();
+     // AccessPoint uses the legacy EthernetInterface, whose egress queue is
+     // ap.eth[i].queue (unlike the modular switch queue below macLayer).
+-    const bool stateBoundary = trafficClass == "state" && path.find(".ap.eth[") != std::string::npos && path.find(".queue") != std::string::npos;
+-    const bool ordersBoundary = trafficClass == "orders" && path.find(".ap.wlan[") != std::string::npos && path.find(".pendingQueue") != std::string::npos;
++    const bool stateBoundary = (role == QUEUE_AP_ETH && std::strcmp(trafficClass, "state") == 0);
++    const bool ordersBoundary = (role == QUEUE_AP_WLAN_PENDING && std::strcmp(trafficClass, "orders") == 0);
+     if (stateBoundary || ordersBoundary)
+         updateDomainTag(packet, [&] (const Ptr<ExperimentPacketTag>& mutableTag) { mutableTag->setApBoundaryTime(simTime()); });
+ }
+ 
+ void ExperimentCoordinator::handlePacketDropped(Packet *packet, cObject *details)
+ {
+-    const auto tag = findTag(packet);
+-    if (tag == nullptr || !tag->getValidForMetrics())
+-        return;
+-    auto recordIt = validPackets.find(tag->getPacketId());
+-    if (recordIt == validPackets.end() || recordIt->second.outcome != PENDING)
+-        return;
+-
+     auto dropDetails = dynamic_cast<PacketDropDetails *>(details);
+     if (dropDetails == nullptr)
+         return;
+@@ -164,23 +215,45 @@ void ExperimentCoordinator::handlePacketDropped(Packet *packet, cObject *details
+     if (reason == NOT_ADDRESSED_TO_US || reason == DUPLICATE_DETECTED || reason == INCORRECTLY_RECEIVED)
+         return;
+ 
+-    const int c = recordIt->second.classIndex;
++    const auto tag = findTag(packet);
++    if (tag == nullptr || !tag->getValidForMetrics())
++        return;
++    const int64_t packetId = tag->getPacketId();
++    if (packetId < 0 || static_cast<size_t>(packetId) >= validPackets.size())
++        return;
++    auto& record = validPackets[packetId];
++    if (record.classIndex < 0 || record.outcome != PENDING)
++        return;
++
++    const int c = record.classIndex;
+     if (reason == QUEUE_OVERFLOW) {
+-        recordIt->second.outcome = DROP_QUEUE;
++        record.outcome = DROP_QUEUE;
+         dropQueue[c]++;
+     }
+     else if (reason == RETRY_LIMIT_REACHED) {
+-        recordIt->second.outcome = DROP_RETRY;
++        record.outcome = DROP_RETRY;
+         dropRetry[c]++;
+     }
+     else {
+-        recordIt->second.outcome = DROP_OTHER;
++        record.outcome = DROP_OTHER;
+         dropOther[c]++;
+     }
+ }
+ 
+ void ExperimentCoordinator::receiveSignal(cComponent *source, simsignal_t signal, cObject *object, cObject *details)
+ {
++    if (signal == packetDroppedSignal) {
++        auto dropDetails = dynamic_cast<PacketDropDetails *>(details);
++        if (dropDetails == nullptr)
++            return;
++        const auto reason = dropDetails->getReason();
++        if (reason == NOT_ADDRESSED_TO_US || reason == DUPLICATE_DETECTED || reason == INCORRECTLY_RECEIVED)
++            return;
++        auto packet = dynamic_cast<Packet *>(object);
++        if (packet != nullptr)
++            handlePacketDropped(packet, details);
++        return;
++    }
+     auto packet = dynamic_cast<Packet *>(object);
+     if (packet == nullptr)
+         return;
+@@ -190,8 +263,6 @@ void ExperimentCoordinator::receiveSignal(cComponent *source, simsignal_t signal
+         handleQueueEvent(source, packet, true);
+     else if (signal == packetPulledSignal)
+         handleQueueEvent(source, packet, false);
+-    else if (signal == packetDroppedSignal)
+-        handlePacketDropped(packet, details);
+ }
+ 
+ int64_t ExperimentCoordinator::getTickPhaseRaw(size_t index) const
+@@ -203,14 +274,14 @@ int64_t ExperimentCoordinator::getTickPhaseRaw(size_t index) const
+ 
+ void ExperimentCoordinator::markDelivered(int64_t packetId, double delayMs)
+ {
+-    auto it = validPackets.find(packetId);
+-    if (it == validPackets.end())
++    if (packetId < 0 || static_cast<size_t>(packetId) >= validPackets.size() || validPackets[packetId].classIndex < 0)
+         throw cRuntimeError("ExperimentCoordinator: delivered packet id %ld is absent from the valid-generation ledger", (long)packetId);
+-    if (it->second.outcome != PENDING)
++    auto& record = validPackets[packetId];
++    if (record.outcome != PENDING)
+         throw cRuntimeError("ExperimentCoordinator: packet id %ld has more than one terminal outcome", (long)packetId);
+-    it->second.outcome = DELIVERED;
+-    deliveredValid[it->second.classIndex]++;
+-    deliveredDelaysMs[it->second.classIndex].push_back(delayMs);
++    record.outcome = DELIVERED;
++    deliveredValid[record.classIndex]++;
++    deliveredDelaysMs[record.classIndex].push_back(delayMs);
+ }
+ 
+ void ExperimentCoordinator::recordClassScalar(const char *prefix, const std::array<long, NUM_CLASSES>& values)
+@@ -225,9 +296,9 @@ void ExperimentCoordinator::finish()
+ {
+     // Valid packets still pending at the run boundary are recorded as late terminations.
+     std::array<long, NUM_CLASSES> lateTermination = {};
+-    for (const auto& entry : validPackets)
+-        if (entry.second.outcome == PENDING)
+-            lateTermination[entry.second.classIndex]++;
++    for (const auto& record : validPackets)
++        if (record.classIndex >= 0 && record.outcome == PENDING)
++            lateTermination[record.classIndex]++;
+ 
+     recordClassScalar("n_generated_total", generatedTotal);
+     recordClassScalar("n_generated_valid", generatedValid);
+diff --git a/src/ExperimentCoordinator.h b/src/ExperimentCoordinator.h
+index 299a908..6cc7d5c 100644
+--- a/src/ExperimentCoordinator.h
++++ b/src/ExperimentCoordinator.h
+@@ -4,8 +4,6 @@
+ #include <array>
+ #include <cstdint>
+ #include <functional>
+-#include <map>
+-#include <set>
+ #include <string>
+ #include <vector>
+ 
+@@ -25,6 +23,7 @@ class INET_API ExperimentCoordinator : public cSimpleModule, public cListener
+ 
+   protected:
+     enum Outcome { PENDING, DELIVERED, DROP_QUEUE, DROP_RETRY, DROP_OTHER };
++    enum QueueRole : uint8_t { QUEUE_NONE = 0, QUEUE_SWITCH = 1, QUEUE_AP_ETH = 2, QUEUE_AP_WLAN_PENDING = 3 };
+ 
+     struct PacketRecord {
+         int classIndex = -1;
+@@ -42,7 +41,9 @@ class INET_API ExperimentCoordinator : public cSimpleModule, public cListener
+     std::array<int64_t, NUM_TICK_PERIODS> tickPhaseRaw = {};
+ 
+     int64_t nextPacketId = 0;
+-    std::map<int64_t, PacketRecord> validPackets;
++    std::vector<PacketRecord> validPackets;
++    std::vector<int8_t> sourceClassById;
++    std::vector<uint8_t> queueRoleById;
+     std::array<long, NUM_CLASSES> generatedTotal = {};
+     std::array<long, NUM_CLASSES> generatedValid = {};
+     std::array<long, NUM_CLASSES> filteredWarmup = {};

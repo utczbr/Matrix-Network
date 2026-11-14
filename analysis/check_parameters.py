@@ -128,23 +128,34 @@ def check_characterization_evidence(params_text):
     return ok
 
 
-def check_statistic_whitelist_order(ini_file: Path = INI_PATH) -> bool:
-    """Verify that all 7 whitelisted @statistic keys appear set to true BEFORE **.statistic-recording = false in [General]."""
-    lines = ini_file.read_text(encoding="utf-8").splitlines()
+def _parse_ini_ordered(ini_file: Path) -> dict[str, list[tuple[str, str]]]:
+    """Parse INI entries into {section: [(key, value), ...]} preserving order and continuations."""
+    sections: dict[str, list[tuple[str, str]]] = {"General": []}
     section = "General"
-    general_keys = []
-    for raw in lines:
-        line = raw.split("#", 1)[0].strip()
+    lines = ini_file.read_text(encoding="utf-8").splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i].split("#", 1)[0].strip()
+        i += 1
         if not line:
             continue
         m = re.match(r"^\[(?:Config\s+)?(\w+)\]$", line)
         if m:
             section = m.group(1)
+            sections.setdefault(section, [])
             continue
-        if section == "General" and "=" in line:
+        while line.endswith("\\") and i < len(lines):
+            line = line[:-1].rstrip() + " " + lines[i].split("#", 1)[0].strip()
+            i += 1
+        if "=" in line:
             k, v = line.split("=", 1)
-            general_keys.append((k.strip(), v.strip()))
+            sections.setdefault(section, []).append((k.strip(), v.strip()))
+    return sections
 
+
+def check_statistic_whitelist_order(ini_file: Path = INI_PATH) -> bool:
+    """Verify that all 7 whitelisted @statistic keys appear set to true BEFORE **.statistic-recording = false in [General]."""
+    general_keys = _parse_ini_ordered(ini_file).get("General", [])
     idx_map = {k: idx for idx, (k, _v) in enumerate(general_keys)}
     val_map = {k: v for k, v in general_keys}
     if "**.statistic-recording" not in idx_map or val_map.get("**.statistic-recording") != "false":
@@ -161,6 +172,66 @@ def check_statistic_whitelist_order(ini_file: Path = INI_PATH) -> bool:
             ok = False
     if ok:
         print(f"  [+] Verified 7-key @statistic whitelist precedes **.statistic-recording = false in [General]")
+    return ok
+
+
+def check_no_production_recording_overrides(ini_file: Path = INI_PATH) -> bool:
+    """Verify no production section or duplicate/wildcard [General] rule re-enables statistics, vectors, bins, or pcap."""
+    sections = _parse_ini_ordered(ini_file)
+    ok = True
+    recording_suffixes = (
+        "statistic-recording",
+        "vector-recording",
+        "bin-recording",
+        "scalar-recording",
+        "result-recording-modes",
+    )
+
+    general_entries = sections.get("General", [])
+    seen_general_rec: set[str] = set()
+    allowed_general_rec = set(WHITELIST_STAT_KEYS) | {
+        "**.statistic-recording",
+        "**.bin-recording",
+        "**.vector-recording",
+        "**.scalar-recording",
+    }
+    for key, val in general_entries:
+        is_rec = key.endswith(recording_suffixes) or key.endswith("recordPcap") or key == "record-eventlog"
+        if not is_rec:
+            continue
+        if key in seen_general_rec:
+            print(f"  [-] [General] duplicate recording directive: {key} = {val}")
+            ok = False
+        seen_general_rec.add(key)
+        if key not in allowed_general_rec:
+            print(f"  [-] [General] unexpected recording directive {key} = {val} outside frozen 7-key whitelist")
+            ok = False
+    general_map = dict(general_entries)
+    if general_map.get("**.vector-recording") != "false":
+        print(f"  [-] [General] **.vector-recording must be false, got {general_map.get('**.vector-recording')!r}")
+        ok = False
+    if general_map.get("**.bin-recording") != "false":
+        print(f"  [-] [General] **.bin-recording must be false, got {general_map.get('**.bin-recording')!r}")
+        ok = False
+    if general_map.get("**.scalar-recording") != "true":
+        print(f"  [-] [General] **.scalar-recording must be true, got {general_map.get('**.scalar-recording')!r}")
+        ok = False
+
+    for sec_name, entries in sections.items():
+        if sec_name in ("General", "Debug"):
+            continue
+        for key, val in entries:
+            if key.endswith(recording_suffixes) or key.endswith("recordPcap") or key == "record-eventlog":
+                print(f"  [-] [Config {sec_name}] forbidden recording override in non-Debug section: {key} = {val}")
+                ok = False
+            if key == "extends":
+                bases = [b.strip() for b in val.split(",") if b.strip()]
+                if "Debug" in bases:
+                    print(f"  [-] [Config {sec_name}] extends Debug in production/sweep hierarchy: extends = {val}")
+                    ok = False
+
+    if ok:
+        print("  [+] Verified no non-Debug section or duplicate/wildcard [General] entry overrides recording controls")
     return ok
 
 
@@ -290,6 +361,8 @@ def check_parameters():
             all_passed = False
 
     if not check_statistic_whitelist_order(INI_PATH):
+        all_passed = False
+    if not check_no_production_recording_overrides(INI_PATH):
         all_passed = False
     if not check_wired_link_ifg_consistency(ini_kv, NED_PATH):
         all_passed = False

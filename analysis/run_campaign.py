@@ -180,6 +180,27 @@ def resolve_jemalloc(jemalloc_path: Optional[str] = DEFAULT_JEMALLOC_PATH) -> Tu
     return str(p), version, sha
 
 
+def check_jemalloc_gate(
+    jemalloc_path: Optional[str] = DEFAULT_JEMALLOC_PATH,
+    expected_sha256: Optional[str] = None,
+) -> Tuple[str, str, str]:
+    """Verify libjemalloc.so.2 exists and (when expected_sha256 is set) matches the pinned SHA-256."""
+    if expected_sha256 is not None:
+        expected = expected_sha256.strip().lower()
+        if not expected:
+            raise ValueError("--expected-jemalloc-sha256 must be a non-empty SHA-256 hex digest")
+        if not jemalloc_path:
+            raise RuntimeError("Cannot enforce --expected-jemalloc-sha256 when jemalloc is disabled")
+    resolved, version, sha = resolve_jemalloc(jemalloc_path)
+    if expected_sha256 is not None:
+        expected = expected_sha256.strip().lower()
+        if sha.lower() != expected:
+            raise RuntimeError(
+                f"jemalloc SHA-256 mismatch for {resolved} ({version}): expected {expected}, got {sha}"
+            )
+    return resolved, version, sha
+
+
 def check_library_gate(
     lib_path: Path = Path(PROJECT_ROOT) / "libmatrixfactory.so",
     expected_sha256: Optional[str] = None,
@@ -464,13 +485,15 @@ def manifest_has_matching_run(
     spec: RunSpec,
     lib_sha256: str,
     config_sha256: Optional[str] = None,
+    jemalloc_sha256: Optional[str] = None,
 ) -> bool:
-    """Return True iff manifest_path has a completed row (exit_code == 0) matching lib_sha256 and config_sha256."""
+    """Return True iff manifest_path has a completed row (exit_code == 0) matching lib, config, and jemalloc SHAs."""
     manifest_path = Path(manifest_path)
     if not manifest_path.exists() or manifest_path.stat().st_size == 0:
         return False
     expected_lib = lib_sha256.strip().lower()
     expected_cfg = config_sha256.strip().lower() if config_sha256 is not None else None
+    expected_jem = jemalloc_sha256.strip().lower() if jemalloc_sha256 is not None else None
     matched = False
     with _MANIFEST_LOCK:
         with open(manifest_path, "r", newline="", encoding="utf-8") as f:
@@ -486,10 +509,72 @@ def manifest_has_matching_run(
                                 cfg_ok = bool(actual_cfg) and (actual_cfg == expected_cfg)
                             else:
                                 cfg_ok = True
-                            matched = lib_ok and cfg_ok
+                            if expected_jem is not None:
+                                if "jemalloc_sha256" not in row:
+                                    jem_ok = False
+                                else:
+                                    actual_jem = str(row.get("jemalloc_sha256") or "").strip().lower()
+                                    jem_ok = actual_jem == expected_jem
+                            else:
+                                jem_ok = True
+                            matched = lib_ok and cfg_ok and jem_ok
                 except ValueError:
                     continue
     return matched
+
+
+def validate_manifest_consistency(
+    manifest_path: Path,
+    lib_sha256: str,
+    config_sha256: str,
+    jemalloc_sha256: str,
+) -> None:
+    """Refuse to resume/append if manifest_path contains mixed provenance or provenance differing from current launch."""
+    manifest_path = Path(manifest_path)
+    if not manifest_path.exists() or manifest_path.stat().st_size == 0:
+        return
+    expected = (
+        lib_sha256.strip().lower(),
+        config_sha256.strip().lower(),
+        jemalloc_sha256.strip().lower(),
+    )
+    seen_provenance = set()
+    with _MANIFEST_LOCK:
+        with open(manifest_path, "r", newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            fieldnames = set(reader.fieldnames or [])
+            missing_cols = {"library_sha256", "config_sha256", "jemalloc_sha256"} - fieldnames
+            if missing_cols:
+                raise RuntimeError(
+                    f"Manifest {manifest_path} is missing provenance column(s) {sorted(missing_cols)}; "
+                    f"use a fresh --out-dir/--evidence-dir"
+                )
+            for row in reader:
+                seen_provenance.add((
+                    str(row.get("library_sha256") or "").strip().lower(),
+                    str(row.get("config_sha256") or "").strip().lower(),
+                    str(row.get("jemalloc_sha256") or "").strip().lower(),
+                ))
+    if not seen_provenance:
+        return
+    if len(seen_provenance) > 1:
+        formatted = [
+            f"(lib={l[:12]}, cfg={c[:12]}, jem={j[:12] or 'none'})"
+            for l, c, j in sorted(seen_provenance)
+        ]
+        raise RuntimeError(
+            f"Mixed provenance rows detected in {manifest_path}: {formatted}. "
+            f"A manifest must remain uniform; use a fresh --out-dir/--evidence-dir."
+        )
+    existing = next(iter(seen_provenance))
+    if existing != expected:
+        raise RuntimeError(
+            f"Manifest {manifest_path} provenance "
+            f"(lib={existing[0][:12]}, cfg={existing[1][:12]}, jem={existing[2][:12] or 'none'}) "
+            f"does not match current launch "
+            f"(lib={expected[0][:12]}, cfg={expected[1][:12]}, jem={expected[2][:12] or 'none'}); "
+            f"use a fresh --out-dir/--evidence-dir instead of mixing runs."
+        )
 
 
 def find_existing_valid_output(
@@ -498,16 +583,21 @@ def find_existing_valid_output(
     manifest_path: Optional[Path] = None,
     lib_sha256: Optional[str] = None,
     config_sha256: Optional[str] = None,
+    jemalloc_sha256: Optional[str] = None,
 ) -> Optional[Path]:
-    """Return the existing .sca.gz or .sca path if present, valid, and matching manifest library/config hashes."""
+    """Return the existing .sca.gz or .sca path if present, valid, and matching manifest library/config/jemalloc hashes."""
     gz_path = spec.sca_gz_path(out_dir)
     sca_path = spec.sca_path(out_dir)
     if manifest_path is not None and lib_sha256 is not None:
         if (gz_path.exists() or sca_path.exists()) and not manifest_has_matching_run(
-            manifest_path, spec, lib_sha256, config_sha256=config_sha256
+            manifest_path,
+            spec,
+            lib_sha256,
+            config_sha256=config_sha256,
+            jemalloc_sha256=jemalloc_sha256,
         ):
             LOG.warning(
-                "Rejecting existing output for %s run %d: missing or mismatched library/config SHA-256 in %s",
+                "Rejecting existing output for %s run %d: missing or mismatched library/config/jemalloc SHA-256 in %s",
                 spec.config_name,
                 spec.run_number,
                 manifest_path,
@@ -661,7 +751,12 @@ def execute_run_with_retry(
     if config_sha256 is None:
         config_sha256 = compute_config_sha256()
     existing = find_existing_valid_output(
-        out_dir, spec, manifest_path=manifest_path, lib_sha256=lib_sha256, config_sha256=config_sha256
+        out_dir,
+        spec,
+        manifest_path=manifest_path,
+        lib_sha256=lib_sha256,
+        config_sha256=config_sha256,
+        jemalloc_sha256=jemalloc_sha256,
     )
     if existing is not None:
         return {"status": "skipped", "path": existing, "spec": spec}
@@ -858,6 +953,10 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                    help="path to libjemalloc.so.2 for LD_PRELOAD (default: %(default)s)")
     p.add_argument("--no-jemalloc", action="store_true",
                    help="disable LD_PRELOAD of libjemalloc.so.2")
+    p.add_argument("--expected-jemalloc-sha256", default=None,
+                   help="fail fast unless libjemalloc.so.2 matches this exact SHA-256 hex digest")
+    p.add_argument("--allow-unpinned-jemalloc", action="store_true",
+                   help="allow pinned launches without --expected-jemalloc-sha256 or with --no-jemalloc (canary/debug only)")
     p.add_argument("--list-only", action="store_true",
                    help="enumerate and print the slice-major schedule summary without running simulations")
     args = p.parse_args(argv)
@@ -868,11 +967,25 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         raise RuntimeError(
             "Production launch requires --expected-lib-sha256 (or pass --allow-unpinned-lib for dev runs)"
         )
+    if not args.list_only:
+        if args.no_jemalloc and args.expected_jemalloc_sha256:
+            raise RuntimeError("Cannot combine --no-jemalloc with --expected-jemalloc-sha256")
+        if args.expected_lib_sha256 and args.no_jemalloc and not args.allow_unpinned_jemalloc:
+            raise RuntimeError(
+                "Pinned launch refuses --no-jemalloc unless --allow-unpinned-jemalloc is explicitly passed (canary use only)"
+            )
+        if args.expected_lib_sha256 and not args.allow_unpinned_jemalloc and not args.expected_jemalloc_sha256:
+            raise RuntimeError(
+                "Pinned launch requires --expected-jemalloc-sha256 (or pass --allow-unpinned-jemalloc for dev/canary runs)"
+            )
 
     lib_sha = check_library_gate(expected_sha256=args.expected_lib_sha256)
     cfg_sha = compute_config_sha256()
     git_head, git_dirty = get_git_state()
-    jem_path, jem_ver, jem_sha = resolve_jemalloc(None if args.no_jemalloc else args.jemalloc_path)
+    jem_path, jem_ver, jem_sha = check_jemalloc_gate(
+        None if args.no_jemalloc else args.jemalloc_path,
+        expected_sha256=args.expected_jemalloc_sha256,
+    )
     LOG.info(
         "Verified libmatrixfactory.so (SHA-256: %s, config_sha256: %s, git_head: %s, dirty: %s, jemalloc: %s [%s, %s])",
         lib_sha,
@@ -922,6 +1035,12 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     ev_dir = Path(args.evidence_dir)
     manifest_path = ev_dir / "manifest.csv"
     log_dir = ev_dir / "logs"
+    validate_manifest_consistency(
+        manifest_path,
+        lib_sha256=lib_sha,
+        config_sha256=cfg_sha,
+        jemalloc_sha256=jem_sha,
+    )
 
     completed = 0
     skipped = 0

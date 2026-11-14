@@ -1,0 +1,16 @@
+[*] Running Cell1 calibration at 54Mbps...
+  [+] 54Mbps: State sequence = 230.13 us, Orders sequence = 170.13 us
+[*] Running Cell1 calibration at 24Mbps...
+  [+] 24Mbps: State sequence = 426.13 us, Orders sequence = 294.13 us
+[*] Running Cell1 calibration at 12Mbps...
+  [+] 12Mbps: State sequence = 786.13 us, Orders sequence = 522.13 us
+[*] Running Cell1 calibration at 6Mbps...
+  [+] 6Mbps: State sequence = 1510.13 us, Orders sequence = 978.13 us
+
+=== Calibration Summary Table ===
+PHY Rate   | State Seq (us)  | State + DIFS (us)  | Orders Seq (us)  | Orders + DIFS (us) 
+----------------------------------------------------------------------------------------
+54Mbps     | 230.13          | 258.13             | 170.13           | 198.13             
+24Mbps     | 426.13          | 454.13             | 294.13           | 322.13             
+12Mbps     | 786.13          | 814.13             | 522.13           | 550.13             
+6Mbps      | 1510.13         | 1538.13            | 978.13           | 1006.13            

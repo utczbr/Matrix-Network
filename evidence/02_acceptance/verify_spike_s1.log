@@ -1,0 +1,5 @@
+ScheduledDcf strict acceptance
+[ok] N=40, 54 Mbps: tx=12100, valid=29751, retries=0, drops=0, State max=20.238 ms, Orders p50/max=7.958/17.230 ms
+[ok] N=80, 12 Mbps: tx=23968, valid=35628, retries=0, drops=0, State max=90.876 ms, Orders p50/max=49.870/152.786 ms
+[ok] CSMA control retry count is nonzero (8)
+all ScheduledDcf acceptance checks passed

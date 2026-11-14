@@ -1,0 +1,47 @@
+=================================================================
+  Checklist C8: Execution Rigor & Validation Suite
+=================================================================
+
+[*] Running Cell1 for 10s (repetition 0)...
+[*] Running Cell2 for 10s (repetition 0)...
+[*] Running Cell3 for 10s (repetition 0)...
+[*] Running Cell5 for 10s (repetition 0)...
+
+[+] Verification 1: AMR Spatial Placement Independence (RNG Isolation)
+  [✓] PASSED: All 10 AMR spatial coordinates are bit-level identical across CSMA and Sched (rng-2 isolated).
+      Sample AMR[0]: X=96.1596941575408m, Y=81.10492488835007m
+
+[+] Verification 2: Offered Load Parity Across Cells 1, 2, 3, and 5 (rng-1 Traffic)
+  [✓] FMS Orders            : Exactly 35 packets generated in all 4 cells (C1=C2=C3=C5).
+  [✓] Station 0 DDS         : Exactly 500 packets generated in all 4 cells (C1=C2=C3=C5).
+  [✓] Station 0 Telemetry   : Exactly 2513 packets generated in all 4 cells (C1=C2=C3=C5).
+  [✓] AMR 0 State           : Exactly 50 packets generated in all 4 cells (C1=C2=C3=C5).
+  [✓] PASSED: Offered load parity verified bit-identical across wired and radio configurations.
+  [✓] First up to 1,000 generation timestamps match exactly for all 28 sources.
+
+[+] Verification 3: Strict Packet Conservation in DeadlineSink
+  [✓] FMS State Sink      : total=997 = warmup(500) + horizon(10) + valid(487); on_time=487, late=0
+  [✓] FMS Telemetry Sink  : total=20101 = warmup(10071) + horizon(216) + valid(9814); on_time=9814, late=0
+  [✓] FMS DDS Sink        : total=3998 = warmup(2000) + horizon(44) + valid(1954); on_time=1954, late=0
+  [✓] AMR[0] Orders Sink  : total=61 = warmup(26) + horizon(1) + valid(34); on_time=34, late=0
+  [✓] AMR[1] Orders Sink  : total=52 = warmup(28) + horizon(1) + valid(23); on_time=23, late=0
+  [✓] AMR[2] Orders Sink  : total=51 = warmup(22) + horizon(0) + valid(29); on_time=29, late=0
+  [✓] AMR[3] Orders Sink  : total=54 = warmup(26) + horizon(0) + valid(28); on_time=28, late=0
+  [✓] AMR[4] Orders Sink  : total=51 = warmup(27) + horizon(0) + valid(24); on_time=24, late=0
+  [✓] AMR[5] Orders Sink  : total=56 = warmup(28) + horizon(1) + valid(27); on_time=27, late=0
+  [✓] AMR[6] Orders Sink  : total=51 = warmup(26) + horizon(0) + valid(25); on_time=25, late=0
+  [✓] AMR[7] Orders Sink  : total=54 = warmup(25) + horizon(2) + valid(27); on_time=27, late=0
+  [✓] AMR[8] Orders Sink  : total=68 = warmup(39) + horizon(0) + valid(29); on_time=29, late=0
+  [✓] AMR[9] Orders Sink  : total=45 = warmup(24) + horizon(0) + valid(21); on_time=21, late=0
+  [✓] PASSED: Strict packet conservation mathematically confirmed.
+  [✓] orders    : generated valid 267 = all terminal outcomes 267
+  [✓] dds       : generated valid 1954 = all terminal outcomes 1954
+  [✓] state     : generated valid 487 = all terminal outcomes 487
+  [✓] telemetry : generated valid 9814 = all terminal outcomes 9814
+
+[+] Verification 4: GCL Gate State Timing in Cell 5 (TAS)
+  [✓] PASSED: 24 gate vectors transition only at the four configured GCL boundaries.
+
+=================================================================
+  ALL CHECKLIST C8 VERIFICATIONS PASSED SUCCESSFULLY!
+=================================================================

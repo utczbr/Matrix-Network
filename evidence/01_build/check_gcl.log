@@ -1,0 +1,49 @@
+class      TC payload       window us   frame us (66/70 B ovh)  frames/win  latest start us
+orders      3    600B        [0, 100)            53.28 / 53.60           1             46.4
+dds         2    200B      [100, 300)            21.28 / 21.60           9            278.4
+state       1   1000B      [300, 500)            85.28 / 85.60           2            414.4
+telemetry   0   1400B     [500, 1000)          117.28 / 117.60           4            882.4
+
+telemetry payload ceiling under TAS: 44.8 Mbps (offered at 8 levels: 22.4, 45.0, 60.0, 74.7, 85.0, 94.9, 110.1, 149.3 Mbps)
+
+Window occupancy = offered frames/s over window capacity (frames/window x cycles/s); >100% = queue grows
+  state      (capacity 2000 frames/s)  N=5: 2%  N=10: 5%  N=20: 10%  N=40: 20%  N=80: 40%
+  orders     (capacity 1000 frames/s)  N=5: 2%  N=10: 5%  N=20: 10%  N=40: 20%  N=80: 40%
+  dds        (capacity 9000 frames/s)  4 stations @ 100 Hz: 4.4%
+  telemetry  (capacity 4000 frames/s)  2000 us: 50%  996 us: 100%  747 us: 134%  600 us: 167%  527 us: 190%  472 us: 212%  407 us: 246%  300 us: 333%
+
+[ok] orders: cycle is 1000 us  (1000 us)
+[ok] orders: window [0, 100) us matches intended [0, 100)
+[ok] orders: window does not wrap the cycle
+[ok] dds: cycle is 1000 us  (1000 us)
+[ok] dds: window [100, 300) us matches intended [100, 300)
+[ok] dds: window does not wrap the cycle
+[ok] state: cycle is 1000 us  (1000 us)
+[ok] state: window [300, 500) us matches intended [300, 500)
+[ok] state: window does not wrap the cycle
+[ok] telemetry: cycle is 1000 us  (1000 us)
+[ok] telemetry: window [500, 1000) us matches intended [500, 1000)
+[ok] telemetry: window does not wrap the cycle
+[ok] windows are pairwise disjoint
+[ok] windows tile the whole cycle (no dead time)  (sum = 1000 us)
+[ok] orders: at least one frame fits the window
+[ok] orders: frames/window identical with and without C-tag  (untagged 1, tagged 1)
+[ok] orders: frames/window identical under L2 (+46/50 B) and wire (+66/70 B) accounting  (wire=1, L2=1)
+[ok] dds: at least one frame fits the window
+[ok] dds: frames/window identical with and without C-tag  (untagged 9, tagged 9)
+[ok] dds: L2 (+46/50 B) vs wire (+66/70 B) accounting differ by exactly one frame (documented wire value 9 vs L2-only 10); in-sim confirmation = checklist C8  (wire=9, L2=10)
+[ok] state: at least one frame fits the window
+[ok] state: frames/window identical with and without C-tag  (untagged 2, tagged 2)
+[ok] state: frames/window identical under L2 (+46/50 B) and wire (+66/70 B) accounting  (wire=2, L2=2)
+[ok] telemetry: at least one frame fits the window
+[ok] telemetry: frames/window identical with and without C-tag  (untagged 4, tagged 4)
+[ok] telemetry: frames/window identical under L2 (+46/50 B) and wire (+66/70 B) accounting  (wire=4, L2=4)
+[ok] Full 1500 B IP MTU serialization is 121.44 us (L2) and 123.04/123.36 us (wire), exceeding both 100 us and 120 us windows  (L2=121.44 us, wire=123.04/123.36 us > 100 us TC3 window)
+[ok] TSN guard band (TC3): 100 us window admits at most 1250 B of wire occupancy on eth[1]  (max_wire=1250 B; configured Orders frame = 666 B)
+[ok] VDA 5050 simple-path Order estimates (E=N-1) span 2124 B (4,3) to 11532 B (20,19) and exceed 1500 B IP MTU for N>=3  (Order(3,2)=1536 B, Order(4,3)=2124 B, Order(20,19)=11532 B)
+[ok] Configured 600 B Orders and 1000 B State lie inside Wagner et al. (2026) low-horizon ranges  (Orders=600 B in [360, 794] B; State=1000 B in [929, 1020, 1095] B)
+[ok] Configured 200 B DDS surrogate accommodates Profanter et al. (2019) 88 B Fast-RTPS UDP payload overhead  (200 B UDP payload = 112 B sample + 88 B Fast-RTPS overhead)
+[ok] Item 6 (Deadline Violation Bound): 80-pkt FIFO max wired drain is 9408.0 us (> 5 ms DDS budget, < 10..100 ms budgets)  (fifo_max_drain=9.408 ms (causes wired Late_Arrival only for D < 9.408 ms))
+[ok] Item 6 (TDMA Operating Limit): 12 Mbps N=80 superframe (90 ms) satisfies 90 ms min State interarrival and D=100 ms but exceeds D=50 ms  (N=40 occupied=39.60 ms <= 42 ms (<50 ms); N=80 occupied=89.84 ms <= 90 ms (>50 ms budget, <=100 ms))
+
+33/33 checks passed

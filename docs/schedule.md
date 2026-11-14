@@ -1,6 +1,6 @@
 # Campaign schedule and gates
 
-**Revision:** October 15, 2026
+**Revision:** November 14, 2026
 
 The former “ready for P3” status is withdrawn. Production starts only after the
 repaired instrumentation and statistical gates pass in the pinned environment.
@@ -29,7 +29,7 @@ repaired instrumentation and statistical gates pass in the pinned environment.
 | PHY | 54, 12 Mbps |
 | Replications | 22 minimum, seeds 0–21 |
 
-Total at the current floor: 10,560 runs (`881.4` to `959.6` CPU-hours, or `9.18` to `10.00` wall-days on 4 workers and `2.37 GiB` compressed `.sca.gz` after the verified Tier A+B bit-identical speedup).
+Total at the current floor: 10,560 runs (`881.5 CPU-hours` / `9.18 wall-days` on 4 workers in the 8-load `PCHIP(N) × linear(λ)` model; `969.6`–`~1,060 CPU-hours` / `10.1–11.0 wall-days` planning budget including `+10%` top-up reserve and `N=10` hold-out superlinearity; `2.37 GiB` compressed `.sca.gz`). Per [`preregistration-campaign-v1.md`](preregistration-campaign-v1.md), P3 (`23 Nov`) runs high-`N` priority slices (`N ∈ {40, 80}`, `4,224` runs / `~6.3 wall-days`) first via `order_runs_slice_major`, then completes `N ∈ {5, 10, 20}` into P4 (`7 Dec`) without reducing `R = 22`.
 
 ## Exit criteria
 

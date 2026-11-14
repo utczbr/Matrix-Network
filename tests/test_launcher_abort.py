@@ -119,8 +119,14 @@ def test_sigterm_becomes_a_clean_exit_so_cleanup_runs():
 def test_pinned_launch_refuses_a_dirty_tree_unless_allowed(tmp_path, monkeypatch):
     monkeypatch.setattr(rc, "get_git_state", lambda *a, **k: ("abc123", True))
     monkeypatch.setattr(rc, "check_library_gate", lambda *a, **k: "ab" * 32)
+    monkeypatch.setattr(rc, "check_jemalloc_gate", lambda *a, **k: ("/lib/libjemalloc.so.2", "5.3.0-1", "cd" * 32))
     monkeypatch.setattr(rc, "enumerate_cell_runs", lambda cell, repeat=22: [])
-    base = ["--expected-lib-sha256", "ab" * 32, "--out-dir", str(tmp_path / "o"), "--evidence-dir", str(tmp_path / "e")]
+    base = [
+        "--expected-lib-sha256", "ab" * 32,
+        "--expected-jemalloc-sha256", "cd" * 32,
+        "--out-dir", str(tmp_path / "o"),
+        "--evidence-dir", str(tmp_path / "e"),
+    ]
     old = signal.getsignal(signal.SIGTERM)
     try:
         with pytest.raises(RuntimeError, match="uncommitted changes"):

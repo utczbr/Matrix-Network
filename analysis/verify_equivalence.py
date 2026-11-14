@@ -245,8 +245,9 @@ def compare_sca_directories(
     opt_dir: Path,
     *,
     tol: float = 0.0,
+    allow_subset: bool = False,
 ) -> Dict[str, object]:
-    """Compare all .sca(.gz) files and all exported tables between base_dir and opt_dir."""
+    """Compare all .sca(.gz) files (and exported tables when directories cover identical run sets)."""
     base_dir = Path(base_dir)
     opt_dir = Path(opt_dir)
     base_files = sorted([*base_dir.glob("*.sca"), *base_dir.glob("*.sca.gz")])
@@ -266,7 +267,13 @@ def compare_sca_directories(
 
     base_map = {_stem(p): p for p in base_files}
     opt_map = {_stem(p): p for p in opt_files}
-    if set(base_map.keys()) != set(opt_map.keys()):
+    if allow_subset:
+        missing_in_base = sorted(set(opt_map.keys()) - set(base_map.keys()))
+        if missing_in_base:
+            raise RuntimeError(
+                f"Subset mismatch: {len(missing_in_base)} file(s) in opt missing from base ({missing_in_base[:3]})"
+            )
+    elif set(base_map.keys()) != set(opt_map.keys()):
         missing = sorted(set(base_map.keys()) - set(opt_map.keys()))
         extra = sorted(set(opt_map.keys()) - set(base_map.keys()))
         raise RuntimeError(
@@ -279,7 +286,8 @@ def compare_sca_directories(
     total_stat_fields = 0
     file_mismatches: Dict[str, List[str]] = {}
 
-    for stem in sorted(base_map.keys()):
+    stems_to_check = sorted(opt_map.keys())
+    for stem in stems_to_check:
         res = compare_sca_pair(base_map[stem], opt_map[stem], tol=tol)
         total_req_scalars += int(res["required_scalars_checked"])
         total_opt_scalars += int(res["opt_scalars_checked"])
@@ -290,44 +298,64 @@ def compare_sca_directories(
     if file_mismatches:
         first_stem = next(iter(file_mismatches))
         raise RuntimeError(
-            f"Raw .sca equivalence failed on {len(file_mismatches)}/{len(base_map)} files; "
+            f"Raw .sca equivalence failed on {len(file_mismatches)}/{len(stems_to_check)} files; "
             f"first ({first_stem}): {file_mismatches[first_stem][:5]}"
         )
 
-    # Compare exported tables
-    base_summary, base_ecdf = ex.build_tables_from_sca(base_dir, expected_reps=None, require_full_grid=False)
-    opt_summary, opt_ecdf = ex.build_tables_from_sca(opt_dir, expected_reps=None, require_full_grid=False)
-    base_reps = base_summary.attrs["replications"].sort_values(ex.KEY + ["rep"]).reset_index(drop=True)
-    opt_reps = opt_summary.attrs["replications"].sort_values(ex.KEY + ["rep"]).reset_index(drop=True)
+    summary_rows: Optional[int] = None
+    ecdf_rows: Optional[int] = None
+    replication_rows: Optional[int] = None
+    domain_delay_rows: Optional[int] = None
+    bottleneck_migration_rows: Optional[int] = None
 
-    _assert_dataframes_equal(base_summary, opt_summary, "lookup_summary", tol=tol)
-    _assert_dataframes_equal(base_ecdf, opt_ecdf, "lookup_ecdf", tol=tol)
-    _assert_dataframes_equal(base_reps, opt_reps, "lookup_replications", tol=tol)
+    if set(base_map.keys()) == set(opt_map.keys()):
+        # Compare exported tables across matched directories
+        base_summary, base_ecdf = ex.build_tables_from_sca(base_dir, expected_reps=None, require_full_grid=False)
+        opt_summary, opt_ecdf = ex.build_tables_from_sca(opt_dir, expected_reps=None, require_full_grid=False)
+        base_reps = base_summary.attrs["replications"].sort_values(ex.KEY + ["rep"]).reset_index(drop=True)
+        opt_reps = opt_summary.attrs["replications"].sort_values(ex.KEY + ["rep"]).reset_index(drop=True)
 
-    base_dom = ex.build_domain_delay_table(base_dir)
-    opt_dom = ex.build_domain_delay_table(opt_dir)
-    _assert_dataframes_equal(base_dom, opt_dom, "lookup_domain_delay", tol=tol)
+        _assert_dataframes_equal(base_summary, opt_summary, "lookup_summary", tol=tol)
+        _assert_dataframes_equal(base_ecdf, opt_ecdf, "lookup_ecdf", tol=tol)
+        _assert_dataframes_equal(base_reps, opt_reps, "lookup_replications", tol=tol)
 
-    base_bm = bm.build_contrasts(base_reps)
-    opt_bm = bm.build_contrasts(opt_reps)
-    _assert_dataframes_equal(base_bm, opt_bm, "bottleneck_migration", tol=tol)
+        base_dom = ex.build_domain_delay_table(base_dir)
+        opt_dom = ex.build_domain_delay_table(opt_dir)
+        _assert_dataframes_equal(base_dom, opt_dom, "lookup_domain_delay", tol=tol)
+
+        summary_rows = len(opt_summary)
+        ecdf_rows = len(opt_ecdf)
+        replication_rows = len(opt_reps)
+        domain_delay_rows = len(opt_dom)
+
+        if not allow_subset or set(int(c) for c in opt_reps["cell"].unique()) == {1, 2, 3, 4, 5, 6}:
+            base_bm = bm.build_contrasts(base_reps)
+            opt_bm = bm.build_contrasts(opt_reps)
+            _assert_dataframes_equal(base_bm, opt_bm, "bottleneck_migration", tol=tol)
+            bottleneck_migration_rows = len(opt_bm)
 
     return {
-        "n_files": len(base_map),
+        "n_files": len(stems_to_check),
+        "subset_mode": allow_subset,
         "total_required_scalars_checked": total_req_scalars,
         "total_opt_scalars_checked": total_opt_scalars,
         "total_sink_stat_fields_checked": total_stat_fields,
-        "summary_rows": len(opt_summary),
-        "ecdf_rows": len(opt_ecdf),
-        "replication_rows": len(opt_reps),
-        "domain_delay_rows": len(opt_dom),
-        "bottleneck_migration_rows": len(opt_bm),
+        "summary_rows": summary_rows,
+        "ecdf_rows": ecdf_rows,
+        "replication_rows": replication_rows,
+        "domain_delay_rows": domain_delay_rows,
+        "bottleneck_migration_rows": bottleneck_migration_rows,
         "passed": True,
     }
 
 
-def compare_manifests(base_manifest: Path, opt_manifest: Path) -> Dict[str, object]:
-    """Compute paired per-run speedup, RSS reduction, and 10,560-run campaign projection from two manifests."""
+def compare_manifests(
+    base_manifest: Path,
+    opt_manifest: Path,
+    *,
+    allow_subset: bool = False,
+) -> Dict[str, object]:
+    """Compute paired per-run speedup, paired RSS differences, and 10,560-run projection from two manifests."""
     df_base = pd.read_csv(base_manifest)
     df_opt = pd.read_csv(opt_manifest)
     df_base = df_base[df_base["exit_code"] == 0].drop_duplicates(subset=["cell", "run_number"], keep="last")
@@ -335,7 +363,12 @@ def compare_manifests(base_manifest: Path, opt_manifest: Path) -> Dict[str, obje
 
     key_cols = ["cell", "nAmr", "phy", "telInterval", "rep", "run_number"]
     merged = pd.merge(df_base, df_opt, on=key_cols, suffixes=("_base", "_opt"))
-    if len(merged) != len(df_base) or len(merged) != len(df_opt):
+    if allow_subset:
+        if len(merged) == 0 or len(merged) != len(df_opt):
+            raise RuntimeError(
+                f"Subset manifest pairing mismatch: base={len(df_base)}, opt={len(df_opt)}, paired={len(merged)}"
+            )
+    elif len(merged) != len(df_base) or len(merged) != len(df_opt):
         raise RuntimeError(
             f"Manifest pairing mismatch: base={len(df_base)}, opt={len(df_opt)}, paired={len(merged)}"
         )
@@ -343,6 +376,9 @@ def compare_manifests(base_manifest: Path, opt_manifest: Path) -> Dict[str, obje
     merged["speedup"] = merged["wall_seconds_base"] / merged["wall_seconds_opt"]
     merged["rss_mib_base"] = merged["max_rss_kb_base"] / 1024.0
     merged["rss_mib_opt"] = merged["max_rss_kb_opt"] / 1024.0
+    merged["rss_diff_mib"] = merged["rss_mib_opt"] - merged["rss_mib_base"]
+    merged["rss_ratio"] = merged["rss_mib_opt"] / merged["rss_mib_base"]
+    merged["rss_pct_change"] = (merged["rss_ratio"] - 1.0) * 100.0
     merged["sca_kb_base"] = merged["sca_bytes_base"] / 1024.0
     merged["sca_kb_opt"] = merged["sca_bytes_opt"] / 1024.0
 
@@ -364,6 +400,10 @@ def compare_manifests(base_manifest: Path, opt_manifest: Path) -> Dict[str, obje
             "speedup_mean_paired": round(float(grp["speedup"].mean()), 3),
             "speedup_min_paired": round(float(grp["speedup"].min()), 3),
             "speedup_max_paired": round(float(grp["speedup"].max()), 3),
+            "base_mean_rss_mib": round(float(grp["rss_mib_base"].mean()), 2),
+            "opt_mean_rss_mib": round(float(grp["rss_mib_opt"].mean()), 2),
+            "paired_rss_diff_mib_mean": round(float(grp["rss_diff_mib"].mean()), 2),
+            "paired_rss_pct_change_mean": round(float(grp["rss_pct_change"].mean()), 2),
             "base_max_rss_mib": round(float(grp["rss_mib_base"].max()), 2),
             "opt_max_rss_mib": round(float(grp["rss_mib_opt"].max()), 2),
         })
@@ -378,6 +418,9 @@ def compare_manifests(base_manifest: Path, opt_manifest: Path) -> Dict[str, obje
             "base_mean_s": round(b_mean, 2),
             "opt_mean_s": round(o_mean, 2),
             "speedup_ratio_of_means": round(b_mean / o_mean, 3),
+            "base_mean_rss_mib": round(float(grp["rss_mib_base"].mean()), 2),
+            "opt_mean_rss_mib": round(float(grp["rss_mib_opt"].mean()), 2),
+            "paired_rss_diff_mib_mean": round(float(grp["rss_diff_mib"].mean()), 2),
             "opt_max_rss_mib": round(float(grp["rss_mib_opt"].max()), 2),
         })
 
@@ -399,6 +442,10 @@ def compare_manifests(base_manifest: Path, opt_manifest: Path) -> Dict[str, obje
             "base_mean_s": round(b_mean, 2),
             "opt_mean_s": round(o_mean, 2),
             "speedup_ratio_of_means": round(b_mean / o_mean, 3),
+            "base_mean_rss_mib": round(float(grp["rss_mib_base"].mean()), 2),
+            "opt_mean_rss_mib": round(float(grp["rss_mib_opt"].mean()), 2),
+            "paired_rss_diff_mib_mean": round(float(grp["rss_diff_mib"].mean()), 2),
+            "paired_rss_pct_change_mean": round(float(grp["rss_pct_change"].mean()), 2),
             "base_max_rss_mib": round(float(grp["rss_mib_base"].max()), 2),
             "opt_max_rss_mib": round(float(grp["rss_mib_opt"].max()), 2),
         })
@@ -448,6 +495,8 @@ def compare_manifests(base_manifest: Path, opt_manifest: Path) -> Dict[str, obje
         proj_opt_cpu_s = sum(mean_opt_by_np[(n, p)] * runs_per_np for n in (5, 10, 20, 40, 80) for p in (12, 54) if (n, p) in mean_opt_by_np)
         per_n_cpu_hours = {}
 
+    opt_cpu_hours = round(proj_opt_cpu_s / 3600.0, 1)
+    opt_wall_days_4w = round(proj_opt_cpu_s / (3600.0 * 24.0 * 4.0), 2)
     return {
         "n_paired_runs": len(merged),
         "total_base_wall_s": round(total_base_s, 2),
@@ -463,16 +512,32 @@ def compare_manifests(base_manifest: Path, opt_manifest: Path) -> Dict[str, obje
         "opt_peak_rss_mib": round(float(merged["rss_mib_opt"].max()), 2),
         "base_mean_rss_mib": round(float(merged["rss_mib_base"].mean()), 2),
         "opt_mean_rss_mib": round(float(merged["rss_mib_opt"].mean()), 2),
+        "paired_rss_diff_mib_mean": round(float(merged["rss_diff_mib"].mean()), 2),
+        "paired_rss_diff_mib_median": round(float(merged["rss_diff_mib"].median()), 2),
+        "paired_rss_diff_mib_min": round(float(merged["rss_diff_mib"].min()), 2),
+        "paired_rss_diff_mib_max": round(float(merged["rss_diff_mib"].max()), 2),
+        "paired_rss_ratio_mean": round(float(merged["rss_ratio"].mean()), 3),
+        "paired_rss_ratio_median": round(float(merged["rss_ratio"].median()), 3),
+        "paired_rss_ratio_min": round(float(merged["rss_ratio"].min()), 3),
+        "paired_rss_ratio_max": round(float(merged["rss_ratio"].max()), 3),
+        "paired_rss_pct_change_mean": round(float(merged["rss_pct_change"].mean()), 2),
+        "paired_rss_decreased_count": int((merged["rss_diff_mib"] < 0).sum()),
+        "paired_rss_increased_count": int((merged["rss_diff_mib"] > 0).sum()),
         "base_mean_sca_kb": round(float(merged["sca_kb_base"].mean()), 2),
         "opt_mean_sca_kb": round(float(merged["sca_kb_opt"].mean()), 2),
         "by_namr_phy": by_namr_phy,
         "by_namr_tel": by_namr_tel,
         "by_cell": by_cell,
         "campaign_10560_projection": {
+            "n_unique_loads": len(lams_8),
+            "mean_load_mbps": round(float(np.mean(lams_8)), 2),
             "base_cpu_hours": round(proj_base_cpu_s / 3600.0, 1),
-            "opt_cpu_hours": round(proj_opt_cpu_s / 3600.0, 1),
+            "opt_cpu_hours": opt_cpu_hours,
             "base_wall_days_4workers": round(proj_base_cpu_s / (3600.0 * 24.0 * 4.0), 2),
-            "opt_wall_days_4workers": round(proj_opt_cpu_s / (3600.0 * 24.0 * 4.0), 2),
+            "opt_wall_days_4workers": opt_wall_days_4w,
+            "planning_topup_margin_fraction": 0.10,
+            "opt_cpu_hours_with_10pct_margin": round((proj_opt_cpu_s / 3600.0) * 1.10, 1),
+            "opt_wall_days_4workers_with_10pct_margin": round((proj_opt_cpu_s * 1.10) / (3600.0 * 24.0 * 4.0), 2),
             "projected_campaign_speedup": round(proj_base_cpu_s / proj_opt_cpu_s, 3) if proj_opt_cpu_s > 0 else float("nan"),
             "per_n_cpu_hours": per_n_cpu_hours,
         },
@@ -493,6 +558,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                    help="optimized manifest.csv path")
     p.add_argument("--tol", type=float, default=0.0,
                    help="numeric comparison tolerance (default 0.0 for exact bit-identity)")
+    p.add_argument("--allow-subset", action="store_true",
+                   help="allow --opt-dir / --opt-manifest to be a non-empty subset of --base-dir / --base-manifest (for --no-jemalloc canary checks)")
     p.add_argument("--skip-whitelisted-stats", action="store_true",
                    help="do not require whitelisted @statistic :count scalars when comparing CLI-only test runs")
     p.add_argument("--out-json", type=Path, default=None,
@@ -532,10 +599,10 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         report["pairs"] = pair_results
 
     if args.base_dir and args.opt_dir:
-        dir_res = compare_sca_directories(args.base_dir, args.opt_dir, tol=args.tol)
+        dir_res = compare_sca_directories(args.base_dir, args.opt_dir, tol=args.tol, allow_subset=args.allow_subset)
         report["directory_equivalence"] = dir_res
         print(
-            f"[PASS] Directory equivalence ({dir_res['n_files']} files): "
+            f"[PASS] Directory equivalence ({dir_res['n_files']} files, subset={dir_res['subset_mode']}): "
             f"req_scalars={dir_res['total_required_scalars_checked']}, "
             f"opt_scalars={dir_res['total_opt_scalars_checked']}, "
             f"stat_fields={dir_res['total_sink_stat_fields_checked']}, "
@@ -545,7 +612,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         )
 
     if args.base_manifest and args.opt_manifest:
-        perf_res = compare_manifests(args.base_manifest, args.opt_manifest)
+        perf_res = compare_manifests(args.base_manifest, args.opt_manifest, allow_subset=args.allow_subset)
         report["manifest_comparison"] = perf_res
         proj = perf_res["campaign_10560_projection"]
         print(
@@ -554,9 +621,13 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             f"(overall speedup={perf_res['overall_speedup_ratio_of_totals']}x, "
             f"paired mean={perf_res['paired_speedup_mean']}x, "
             f"min={perf_res['paired_speedup_min']}x, max={perf_res['paired_speedup_max']}x); "
-            f"peak RSS {perf_res['base_peak_rss_mib']} MiB -> {perf_res['opt_peak_rss_mib']} MiB; "
+            f"mean RSS {perf_res['base_mean_rss_mib']} -> {perf_res['opt_mean_rss_mib']} MiB "
+            f"(paired mean diff {perf_res['paired_rss_diff_mib_mean']:+.2f} MiB, "
+            f"{perf_res['paired_rss_pct_change_mean']:+.2f}%, "
+            f"peak {perf_res['base_peak_rss_mib']} -> {perf_res['opt_peak_rss_mib']} MiB); "
             f"10,560-run projection: {proj['base_cpu_hours']} -> {proj['opt_cpu_hours']} CPU-h "
-            f"({proj['base_wall_days_4workers']} -> {proj['opt_wall_days_4workers']} wall-days @ 4 workers)"
+            f"({proj['base_wall_days_4workers']} -> {proj['opt_wall_days_4workers']} wall-days @ 4 workers; "
+            f"+10% margin: {proj['opt_cpu_hours_with_10pct_margin']} CPU-h / {proj['opt_wall_days_4workers_with_10pct_margin']} d)"
         )
 
     if args.out_json:
