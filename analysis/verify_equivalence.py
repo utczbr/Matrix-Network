@@ -381,30 +381,72 @@ def compare_manifests(base_manifest: Path, opt_manifest: Path) -> Dict[str, obje
             "opt_max_rss_mib": round(float(grp["rss_mib_opt"].max()), 2),
         })
 
-    # Re-weight the full 10,560-run campaign (N in {5, 10, 20, 40, 80}, PHY in {12, 54},
-    # 6 cells * 8 telIntervals * 22 reps = 1,056 runs per (N, PHY) pair).
-    # For N=10 (if not in the 192-run gate), linearly interpolate mean wall_seconds between N=5 and N=20
-    # separately for each PHY.
-    mean_base_by_np = {
-        (int(r["nAmr"]), int(r["phy"])): float(grp["wall_seconds_base"].mean())
-        for (namr, phy), grp in merged.groupby(["nAmr", "phy"])
-        for r in [{"nAmr": namr, "phy": phy}]
-    }
-    mean_opt_by_np = {
-        (int(r["nAmr"]), int(r["phy"])): float(grp["wall_seconds_opt"].mean())
-        for (namr, phy), grp in merged.groupby(["nAmr", "phy"])
-        for r in [{"nAmr": namr, "phy": phy}]
-    }
+    # Re-weight the full 10,560-run campaign across all 40 (N, lambda) grid slices
+    # (N in {5, 10, 20, 40, 80}, 8 telIntervals in {2000..300us} -> lambda in {22.4..149.3 Mbps},
+    # 264 runs per (N, lambda) slice = 6 cells * 2 PHYs * 22 reps = 10,560 runs total)
+    # using PCHIP(N) x linear(lambda) between 2000us (22.4 Mbps) and 300us (149.3 Mbps).
+    from scipy.interpolate import PchipInterpolator
+    TEL_INTERVAL_TO_MBPS = ex.TEL_INTERVAL_TO_MBPS
 
-    for phy in (12, 54):
-        if (10, phy) not in mean_opt_by_np and (5, phy) in mean_opt_by_np and (20, phy) in mean_opt_by_np:
-            w = (10.0 - 5.0) / (20.0 - 5.0)
-            mean_base_by_np[(10, phy)] = (1.0 - w) * mean_base_by_np[(5, phy)] + w * mean_base_by_np[(20, phy)]
-            mean_opt_by_np[(10, phy)] = (1.0 - w) * mean_opt_by_np[(5, phy)] + w * mean_opt_by_np[(20, phy)]
+    by_namr_tel = []
+    for (namr, tel), grp in merged.groupby(["nAmr", "telInterval"], sort=True):
+        b_mean = float(grp["wall_seconds_base"].mean())
+        o_mean = float(grp["wall_seconds_opt"].mean())
+        by_namr_tel.append({
+            "nAmr": int(namr),
+            "telInterval": str(tel),
+            "n_runs": len(grp),
+            "base_mean_s": round(b_mean, 2),
+            "opt_mean_s": round(o_mean, 2),
+            "speedup_ratio_of_means": round(b_mean / o_mean, 3),
+            "base_max_rss_mib": round(float(grp["rss_mib_base"].max()), 2),
+            "opt_max_rss_mib": round(float(grp["rss_mib_opt"].max()), 2),
+        })
 
-    runs_per_np = 6 * 8 * 22  # 1,056 runs per (N_AMR, PHY) pair; 10 pairs = 10,560 runs
-    proj_base_cpu_s = sum(mean_base_by_np[(n, p)] * runs_per_np for n in (5, 10, 20, 40, 80) for p in (12, 54) if (n, p) in mean_base_by_np)
-    proj_opt_cpu_s = sum(mean_opt_by_np[(n, p)] * runs_per_np for n in (5, 10, 20, 40, 80) for p in (12, 54) if (n, p) in mean_opt_by_np)
+    ns_present = sorted(int(n) for n in merged["nAmr"].unique())
+    tels_present = set(merged["telInterval"].unique())
+    lams_8 = sorted(set(TEL_INTERVAL_TO_MBPS.values()))
+    if ns_present == [5, 20, 40, 80] and {"2000us", "300us"}.issubset(tels_present):
+        ns_obs = np.array([5, 20, 40, 80], dtype=float)
+        b_2000 = merged[merged["telInterval"] == "2000us"].groupby("nAmr")["wall_seconds_base"].mean().reindex([5, 20, 40, 80]).to_numpy()
+        b_300 = merged[merged["telInterval"] == "300us"].groupby("nAmr")["wall_seconds_base"].mean().reindex([5, 20, 40, 80]).to_numpy()
+        o_2000 = merged[merged["telInterval"] == "2000us"].groupby("nAmr")["wall_seconds_opt"].mean().reindex([5, 20, 40, 80]).to_numpy()
+        o_300 = merged[merged["telInterval"] == "300us"].groupby("nAmr")["wall_seconds_opt"].mean().reindex([5, 20, 40, 80]).to_numpy()
+        b_lo_p = PchipInterpolator(ns_obs, b_2000)
+        b_hi_p = PchipInterpolator(ns_obs, b_300)
+        o_lo_p = PchipInterpolator(ns_obs, o_2000)
+        o_hi_p = PchipInterpolator(ns_obs, o_300)
+        proj_base_cpu_s = 0.0
+        proj_opt_cpu_s = 0.0
+        per_n_cpu_hours = {}
+        for n in (5, 10, 20, 40, 80):
+            wb0, wb1 = float(b_lo_p(n)), float(b_hi_p(n))
+            wo0, wo1 = float(o_lo_p(n)), float(o_hi_p(n))
+            nb_s = sum(264.0 * (wb0 + (wb1 - wb0) * (lam - 22.4) / (149.3 - 22.4)) for lam in lams_8)
+            no_s = sum(264.0 * (wo0 + (wo1 - wo0) * (lam - 22.4) / (149.3 - 22.4)) for lam in lams_8)
+            proj_base_cpu_s += nb_s
+            proj_opt_cpu_s += no_s
+            per_n_cpu_hours[str(n)] = {"base_cpu_h": round(nb_s / 3600.0, 1), "opt_cpu_h": round(no_s / 3600.0, 1)}
+    else:
+        mean_base_by_np = {
+            (int(r["nAmr"]), int(r["phy"])): float(grp["wall_seconds_base"].mean())
+            for (namr, phy), grp in merged.groupby(["nAmr", "phy"])
+            for r in [{"nAmr": namr, "phy": phy}]
+        }
+        mean_opt_by_np = {
+            (int(r["nAmr"]), int(r["phy"])): float(grp["wall_seconds_opt"].mean())
+            for (namr, phy), grp in merged.groupby(["nAmr", "phy"])
+            for r in [{"nAmr": namr, "phy": phy}]
+        }
+        for phy in (12, 54):
+            if (10, phy) not in mean_opt_by_np and (5, phy) in mean_opt_by_np and (20, phy) in mean_opt_by_np:
+                w = (10.0 - 5.0) / (20.0 - 5.0)
+                mean_base_by_np[(10, phy)] = (1.0 - w) * mean_base_by_np[(5, phy)] + w * mean_base_by_np[(20, phy)]
+                mean_opt_by_np[(10, phy)] = (1.0 - w) * mean_opt_by_np[(5, phy)] + w * mean_opt_by_np[(20, phy)]
+        runs_per_np = 6 * 8 * 22
+        proj_base_cpu_s = sum(mean_base_by_np[(n, p)] * runs_per_np for n in (5, 10, 20, 40, 80) for p in (12, 54) if (n, p) in mean_base_by_np)
+        proj_opt_cpu_s = sum(mean_opt_by_np[(n, p)] * runs_per_np for n in (5, 10, 20, 40, 80) for p in (12, 54) if (n, p) in mean_opt_by_np)
+        per_n_cpu_hours = {}
 
     return {
         "n_paired_runs": len(merged),
@@ -424,6 +466,7 @@ def compare_manifests(base_manifest: Path, opt_manifest: Path) -> Dict[str, obje
         "base_mean_sca_kb": round(float(merged["sca_kb_base"].mean()), 2),
         "opt_mean_sca_kb": round(float(merged["sca_kb_opt"].mean()), 2),
         "by_namr_phy": by_namr_phy,
+        "by_namr_tel": by_namr_tel,
         "by_cell": by_cell,
         "campaign_10560_projection": {
             "base_cpu_hours": round(proj_base_cpu_s / 3600.0, 1),
@@ -431,6 +474,7 @@ def compare_manifests(base_manifest: Path, opt_manifest: Path) -> Dict[str, obje
             "base_wall_days_4workers": round(proj_base_cpu_s / (3600.0 * 24.0 * 4.0), 2),
             "opt_wall_days_4workers": round(proj_opt_cpu_s / (3600.0 * 24.0 * 4.0), 2),
             "projected_campaign_speedup": round(proj_base_cpu_s / proj_opt_cpu_s, 3) if proj_opt_cpu_s > 0 else float("nan"),
+            "per_n_cpu_hours": per_n_cpu_hours,
         },
     }
 

@@ -29,7 +29,7 @@ repaired instrumentation and statistical gates pass in the pinned environment.
 | PHY | 54, 12 Mbps |
 | Replications | 22 minimum, seeds 0–21 |
 
-Total at the current floor: 10,560 runs.
+Total at the current floor: 10,560 runs (`881.4` to `959.6` CPU-hours, or `9.18` to `10.00` wall-days on 4 workers and `2.37 GiB` compressed `.sca.gz` after the verified Tier A+B bit-identical speedup).
 
 ## Exit criteria
 

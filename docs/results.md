@@ -1,6 +1,6 @@
 # Validation and Results Status
 
-**Revision:** November 10, 2026 (`libmatrixfactory.so` SHA-256 `63dd72db2c65…`, updated after `ScheduledDcf::hasFrameToTransmit()` fix)
+**Revision:** November 14, 2026 (`libmatrixfactory.so` SHA-256 `63dd72db2c65…`, updated after `ScheduledDcf::hasFrameToTransmit()` fix and Tier A+B bit-identical speedup gate)
 
 Implementation responsibilities are mapped in the corresponding `docs/SPEC-*.md` files. Pre-production acceptance suites and the statistical pilot campaign are validated and recorded below; full-scale production results (the 10,560-run sweep) remain pending campaign execution.
 
@@ -32,6 +32,17 @@ No production campaign result is currently claimed. Historical pilot numbers pri
 - The quantile contract is synchronized at 25 levels.
 - The campaign replication floor is 22, confirmed by the repaired
   primary-miss-rate pilot (achieving 6.25% relative error at 95% CI).
+- Tier A (`[General]` `packetNameFormat = "pkt"`, 7-key `@statistic` whitelist
+  preceding `**.statistic-recording = false`, `**.bin-recording = false`,
+  `**.vector-recording = false`, `**.scalar-recording = true`, and
+  `**.eth[*].phyLayer.interFrameGapInserter.duration = 0.96us`) and Tier B
+  (`jemalloc 5.3.0-1` `LD_PRELOAD` in `analysis/run_campaign.py` with manifest
+  provenance) deliver a `2.257×` total (`2.372×` mean paired) speedup and reduce
+  peak single-worker RSS from `238.56 MiB` to `183.47 MiB` while keeping
+  `libmatrixfactory.so` (`63dd72db2c65…`) unchanged and all `192/192` dry-run
+  pairs (`simulations/results/dry_run_opt`, `evidence/05_dry_run_opt`) and all 7
+  exported tables bit-for-bit identical (`0` mismatches across `688,320`
+  required scalars, `771,744` optimized scalars, and `369,264` statistic fields).
 
 ## Evidence available in this workspace
 

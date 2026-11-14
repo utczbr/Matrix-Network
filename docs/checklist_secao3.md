@@ -18,6 +18,7 @@
   repetition/full-grid gates, and nonzero physical-drop ingestion.
 - [x] Paired-seed bottleneck migration analysis.
 - [x] Pinned Python dependency manifest.
+- [x] Bit-identical Tier A (`[General]` 7-key `@statistic` whitelist, `packetNameFormat = "pkt"`, `interFrameGapInserter.duration = 0.96us`) + Tier B (`jemalloc 5.3.0-1`) speedup (`2.257×` total / `2.372×` mean paired across 192 dry-run runs) and `verify_equivalence.py` gate.
 
 ## Must pass before P3
 
