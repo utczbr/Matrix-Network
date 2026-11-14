@@ -61,6 +61,8 @@ CORNER_PHYS = {12, 54}
 CORNER_TELS = {"2000us", "300us"}
 CORNER_REPS = {0, 1}
 
+DEFAULT_JEMALLOC_PATH = "/usr/lib/x86_64-linux-gnu/libjemalloc.so.2"
+
 MANIFEST_COLUMNS = [
     "cell",
     "nAmr",
@@ -79,6 +81,9 @@ MANIFEST_COLUMNS = [
     "config_sha256",
     "git_head",
     "git_dirty",
+    "jemalloc_path",
+    "jemalloc_version",
+    "jemalloc_sha256",
 ]
 
 _RUN_LINE_RE = re.compile(
@@ -156,6 +161,23 @@ def get_git_state(repo_dir: Path = Path(PROJECT_ROOT)) -> Tuple[str, bool]:
     )
     dirty = bool(status_res.stdout.strip()) if status_res.returncode == 0 else True
     return head, dirty
+
+
+def resolve_jemalloc(jemalloc_path: Optional[str] = DEFAULT_JEMALLOC_PATH) -> Tuple[str, str, str]:
+    """Verify jemalloc shared object and return (resolved_path, package_version, sha256)."""
+    if not jemalloc_path:
+        return "", "disabled", ""
+    p = Path(jemalloc_path)
+    if not p.exists():
+        raise FileNotFoundError(f"jemalloc library not found at {p} (pass --no-jemalloc to disable)")
+    sha = sha256_file(p)
+    ver_res = subprocess.run(
+        ["dpkg-query", "-W", "-f=${Version}", "libjemalloc2"],
+        capture_output=True,
+        text=True,
+    )
+    version = ver_res.stdout.strip() if ver_res.returncode == 0 and ver_res.stdout.strip() else "unknown"
+    return str(p), version, sha
 
 
 def check_library_gate(
@@ -596,12 +618,14 @@ def default_runner(
     log_path: Path,
     sim_time_limit: Optional[str] = None,
     timeout_sec: Optional[float] = None,
+    jemalloc_path: Optional[str] = DEFAULT_JEMALLOC_PATH,
 ) -> Tuple[int, int]:
     """Run one OMNeT++ simulation and return (exit_code, max_rss_kb) via os.wait4."""
     time_override = f"'--sim-time-limit={sim_time_limit}' '--**.simTimeLimit={sim_time_limit}'" if sim_time_limit else ""
+    preload_prefix = f"LD_PRELOAD='{jemalloc_path}' " if jemalloc_path else ""
     cmd = (
         f"source {OMNETPP_ENV} && export INET_ROOT={INET_ROOT} && cd {SIM_DIR} && "
-        f"opp_run -n $INET_ROOT/src:../src:. -l $INET_ROOT/src/INET -l {MATRIXFACTORY_LIB} "
+        f"{preload_prefix}opp_run -n $INET_ROOT/src:../src:. -l $INET_ROOT/src/INET -l {MATRIXFACTORY_LIB} "
         f"-u Cmdenv -c {spec.config_name} -r {spec.run_number} omnetpp.ini "
         f"'--result-dir={out_dir.resolve()}' {time_override}"
     )
@@ -626,6 +650,9 @@ def execute_run_with_retry(
     timeout_sec: Optional[float] = 3600.0,
     git_head: Optional[str] = None,
     git_dirty: Optional[bool] = None,
+    jemalloc_path: str = "",
+    jemalloc_version: str = "",
+    jemalloc_sha256: str = "",
     runner: Optional[Callable[..., Tuple[int, int]]] = None,
 ) -> Dict[str, object]:
     """Execute one RunSpec with resumability and at most 1 retry of the exact same run_number."""
@@ -660,7 +687,14 @@ def execute_run_with_retry(
         if runner is not None:
             rc, max_rss_kb = runner(spec, out_dir, log_path, sim_time_limit)
         else:
-            rc, max_rss_kb = default_runner(spec, out_dir, log_path, sim_time_limit, timeout_sec=timeout_sec)
+            rc, max_rss_kb = default_runner(
+                spec,
+                out_dir,
+                log_path,
+                sim_time_limit,
+                timeout_sec=timeout_sec,
+                jemalloc_path=jemalloc_path or None,
+            )
         wall_s = round(time.monotonic() - t0, 3)
         cleanup_auxiliary_files(out_dir, spec)
         if _ABORT.is_set():  # killed by us, not a real failure: no failure row, no retry
@@ -697,6 +731,9 @@ def execute_run_with_retry(
                 "config_sha256": config_sha256,
                 "git_head": git_head,
                 "git_dirty": int(bool(git_dirty)),
+                "jemalloc_path": jemalloc_path,
+                "jemalloc_version": jemalloc_version,
+                "jemalloc_sha256": jemalloc_sha256,
             }
             append_manifest_row(manifest_path, row)
             return {"status": "completed", "path": final_path, "row": row, "attempts": attempt}
@@ -722,6 +759,9 @@ def execute_run_with_retry(
                 "config_sha256": config_sha256,
                 "git_head": git_head,
                 "git_dirty": int(bool(git_dirty)),
+                "jemalloc_path": jemalloc_path,
+                "jemalloc_version": jemalloc_version,
+                "jemalloc_sha256": jemalloc_sha256,
             }
             append_manifest_row(manifest_path, fail_row)
             LOG.error(
@@ -814,6 +854,10 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                    help="per-run wall-clock timeout in seconds (default 3600)")
     p.add_argument("--sim-time-limit", default=None,
                    help="optional override for sim-time-limit (for testing only)")
+    p.add_argument("--jemalloc-path", default=DEFAULT_JEMALLOC_PATH,
+                   help="path to libjemalloc.so.2 for LD_PRELOAD (default: %(default)s)")
+    p.add_argument("--no-jemalloc", action="store_true",
+                   help="disable LD_PRELOAD of libjemalloc.so.2")
     p.add_argument("--list-only", action="store_true",
                    help="enumerate and print the slice-major schedule summary without running simulations")
     args = p.parse_args(argv)
@@ -828,12 +872,16 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     lib_sha = check_library_gate(expected_sha256=args.expected_lib_sha256)
     cfg_sha = compute_config_sha256()
     git_head, git_dirty = get_git_state()
+    jem_path, jem_ver, jem_sha = resolve_jemalloc(None if args.no_jemalloc else args.jemalloc_path)
     LOG.info(
-        "Verified libmatrixfactory.so (SHA-256: %s, config_sha256: %s, git_head: %s, dirty: %s)",
+        "Verified libmatrixfactory.so (SHA-256: %s, config_sha256: %s, git_head: %s, dirty: %s, jemalloc: %s [%s, %s])",
         lib_sha,
         cfg_sha,
         git_head,
         git_dirty,
+        jem_path or "disabled",
+        jem_ver,
+        jem_sha[:12] if jem_sha else "none",
     )
     if git_dirty and args.expected_lib_sha256 and not args.allow_dirty and not args.list_only:
         raise RuntimeError(
@@ -892,6 +940,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 timeout_sec=args.timeout_sec,
                 git_head=git_head,
                 git_dirty=git_dirty,
+                jemalloc_path=jem_path,
+                jemalloc_version=jem_ver,
+                jemalloc_sha256=jem_sha,
             )
             if res["status"] == "skipped":
                 skipped += 1
@@ -918,12 +969,16 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                     manifest_path=manifest_path,
                     log_dir=log_dir,
                     lib_sha256=lib_sha,
+                    config_sha256=cfg_sha,
                     compress=not args.no_gzip,
                     min_free_gb=args.min_free_gb,
                     sim_time_limit=args.sim_time_limit,
                     timeout_sec=args.timeout_sec,
                     git_head=git_head,
                     git_dirty=git_dirty,
+                    jemalloc_path=jem_path,
+                    jemalloc_version=jem_ver,
+                    jemalloc_sha256=jem_sha,
                 ),
             )
             for res in slice_results:

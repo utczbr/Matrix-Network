@@ -12,8 +12,19 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 INI_PATH = REPO_ROOT / "simulations" / "omnetpp.ini"
+NED_PATH = REPO_ROOT / "simulations" / "MatrixFactoryNetwork.ned"
 PARAMS_MD_PATH = REPO_ROOT / "docs" / "parameters.md"
 CAPACITY_MD_PATH = REPO_ROOT / "docs" / "capacity.md"
+
+WHITELIST_STAT_KEYS = (
+    "**.app[*].source.packets.statistic-recording",
+    "**.app[*].source.generationEvents.statistic-recording",
+    "**.tsnSwitch.eth[*].macLayer.queue.transmissionGate[*].gateState.statistic-recording",
+    "**.wlan[*].mac.dcf.packetSentToPeer.statistic-recording",
+    "**.wlan[*].mac.dcf.packetSentToPeerWithRetry.statistic-recording",
+    "**.wlan[*].mac.dcf.recoveryProcedure.retryLimitReached.statistic-recording",
+    "**.wlan[*].mac.dcf.frameSequenceDuration.statistic-recording",
+)
 
 
 def parse_ini_sections(ini_file):
@@ -117,6 +128,120 @@ def check_characterization_evidence(params_text):
     return ok
 
 
+def check_statistic_whitelist_order(ini_file: Path = INI_PATH) -> bool:
+    """Verify that all 7 whitelisted @statistic keys appear set to true BEFORE **.statistic-recording = false in [General]."""
+    lines = ini_file.read_text(encoding="utf-8").splitlines()
+    section = "General"
+    general_keys = []
+    for raw in lines:
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        m = re.match(r"^\[(?:Config\s+)?(\w+)\]$", line)
+        if m:
+            section = m.group(1)
+            continue
+        if section == "General" and "=" in line:
+            k, v = line.split("=", 1)
+            general_keys.append((k.strip(), v.strip()))
+
+    idx_map = {k: idx for idx, (k, _v) in enumerate(general_keys)}
+    val_map = {k: v for k, v in general_keys}
+    if "**.statistic-recording" not in idx_map or val_map.get("**.statistic-recording") != "false":
+        print("  [-] [General] missing **.statistic-recording = false")
+        return False
+    stop_idx = idx_map["**.statistic-recording"]
+    ok = True
+    for wk in WHITELIST_STAT_KEYS:
+        if wk not in idx_map or val_map.get(wk) != "true":
+            print(f"  [-] [General] missing whitelisted statistic key {wk} = true")
+            ok = False
+        elif idx_map[wk] >= stop_idx:
+            print(f"  [-] [General] whitelisted key {wk} appears AFTER **.statistic-recording = false (first-match-wins would disable it)")
+            ok = False
+    if ok:
+        print(f"  [+] Verified 7-key @statistic whitelist precedes **.statistic-recording = false in [General]")
+    return ok
+
+
+def _parse_rate_bps(rate_str: str) -> float:
+    m = re.match(r"^([0-9]+(?:\.[0-9]+)?)\s*(Gbps|Mbps|kbps|bps)$", rate_str.strip())
+    if not m:
+        raise ValueError(f"Unsupported bitrate literal: {rate_str!r}")
+    val = float(m.group(1))
+    unit = m.group(2)
+    scale = {"bps": 1.0, "kbps": 1e3, "Mbps": 1e6, "Gbps": 1e9}[unit]
+    return val * scale
+
+
+def _parse_duration_sec(dur_str: str) -> float:
+    m = re.match(r"^([0-9]+(?:\.[0-9]+)?)\s*(ns|us|ms|s)$", dur_str.strip())
+    if not m:
+        raise ValueError(f"Unsupported duration literal: {dur_str!r}")
+    val = float(m.group(1))
+    unit = m.group(2)
+    scale = {"ns": 1e-9, "us": 1e-6, "ms": 1e-3, "s": 1.0}[unit]
+    return val * scale
+
+
+def check_wired_link_ifg_consistency(ini_kv: dict, ned_file: Path = NED_PATH) -> bool:
+    """Verify that MatrixFactoryNetwork.ned wired bitrate, connections, and INI interFrameGapInserter.duration all match 96b / bitrate."""
+    if not ned_file.exists():
+        print(f"  [-] NED file not found: {ned_file}")
+        return False
+    ned_text = ned_file.read_text(encoding="utf-8")
+    # Remove single-line comments
+    clean_lines = [line.split("//", 1)[0].strip() for line in ned_text.splitlines()]
+    clean_ned = "\n".join(clean_lines)
+
+    m_rate = re.search(r"\*\.eth\[\*\]\.bitrate\s*=\s*default\(([^)]+)\)", clean_ned)
+    if not m_rate:
+        print("  [-] MatrixFactoryNetwork.ned missing *.eth[*].bitrate = default(...)")
+        return False
+    ned_bitrate_bps = _parse_rate_bps(m_rate.group(1))
+
+    # Inspect every bidirectional connection in connections:
+    conn_matches = list(re.finditer(r"([^\s;]+)\s*<-->\s*([^\s;{]+)\s*(\{[^}]*\})?\s*<-->\s*([^\s;]+)\s*;", clean_ned))
+    if len(conn_matches) < 3:
+        print(f"  [-] MatrixFactoryNetwork.ned: expected >= 3 wired connections, found {len(conn_matches)}")
+        return False
+    for cm in conn_matches:
+        chan_type = cm.group(2)
+        chan_body = cm.group(3) or ""
+        if chan_type != "EthernetLink":
+            print(f"  [-] Non-EthernetLink wired channel {chan_type!r} in MatrixFactoryNetwork.ned")
+            return False
+        if "datarate" in chan_body or "bitrate" in chan_body:
+            print(f"  [-] Connection-specific bitrate/datarate override in MatrixFactoryNetwork.ned: {cm.group(0)!r}")
+            return False
+
+    # Ensure no INI section overrides eth bitrate or channel datarate
+    for (sec, key), val in ini_kv.items():
+        if ("eth" in key and "bitrate" in key) or ("datarate" in key):
+            if _parse_rate_bps(val) != ned_bitrate_bps:
+                print(f"  [-] INI [{sec}] {key} = {val} overrides NED wired bitrate {m_rate.group(1)}")
+                return False
+
+    ifg_str = ini_kv.get(("General", "**.eth[*].phyLayer.interFrameGapInserter.duration"))
+    if not ifg_str:
+        print("  [-] [General] missing **.eth[*].phyLayer.interFrameGapInserter.duration")
+        return False
+    ifg_sec = _parse_duration_sec(ifg_str)
+    expected_ifg_sec = 96.0 / ned_bitrate_bps
+    if abs(ifg_sec - expected_ifg_sec) > 1e-15:
+        print(
+            f"  [-] IFG duration mismatch: INI has {ifg_str} ({ifg_sec:.9e} s), "
+            f"but 96 bits / {m_rate.group(1)} = {expected_ifg_sec:.9e} s"
+        )
+        return False
+
+    print(
+        f"  [+] Verified wired IFG consistency: {len(conn_matches)} NED EthernetLink connections at "
+        f"{m_rate.group(1)} match 96b / {m_rate.group(1)} = {ifg_str}"
+    )
+    return True
+
+
 def check_parameters():
     print(f"[*] Checking {INI_PATH.relative_to(REPO_ROOT)} against {PARAMS_MD_PATH.relative_to(REPO_ROOT)}...")
     if not INI_PATH.exists():
@@ -142,6 +267,12 @@ def check_parameters():
         ("General", "*.fms.app[3..].source.packetLength", "600B", r"Orders.*`600`\s*B"),
         ("General", "*.station[*].app[0].source.packetLength", "200B", r"DDS.*`200`\s*B"),
         ("General", "*.station[*].app[1].source.packetLength", "1400B", r"Telemetry.*`1400`\s*B"),
+        ("General", "**.app[*].source.packetNameFormat", '"pkt"', r"`\*\*\.app\[\*\]\.source\.packetNameFormat`\s*\|\s*`\"pkt\"`"),
+        ("General", "**.statistic-recording", "false", r"`\*\*\.statistic-recording`\s*\|\s*`false`"),
+        ("General", "**.bin-recording", "false", r"`\*\*\.bin-recording`\s*\|\s*`false`"),
+        ("General", "**.vector-recording", "false", r"`\*\*\.vector-recording`\s*\|\s*`false`"),
+        ("General", "**.scalar-recording", "true", r"`\*\*\.scalar-recording`\s*\|\s*`true`"),
+        ("General", "**.eth[*].phyLayer.interFrameGapInserter.duration", "0.96us", r"`\*\*\.eth\[\*\]\.phyLayer\.interFrameGapInserter\.duration`\s*\|\s*`0\.96us`"),
         ("Wired_FIFO", "**.tsnSwitch.eth[*].macLayer.queue.packetCapacity", "80", r"`DropTailQueue`\s*\|\s*`80`\s*packets"),
         ("Wired_Prio", "**.tsnSwitch.eth[*].macLayer.queue.queue[*].packetCapacity", "20", r"`20`\s*packets\s*/\s*class"),
         ("Wired_TAS", "**.tsnSwitch.eth[*].macLayer.queue.queue[*].packetCapacity", "20", r"`20`\s*packets\s*/\s*class"),
@@ -158,6 +289,10 @@ def check_parameters():
             print(f"  [-] Mismatch [{section}] {key}: INI={val!r} (expected {expected_ini!r}), doc_match={doc_ok}")
             all_passed = False
 
+    if not check_statistic_whitelist_order(INI_PATH):
+        all_passed = False
+    if not check_wired_link_ifg_consistency(ini_kv, NED_PATH):
+        all_passed = False
     if not check_characterization_evidence(params_text):
         all_passed = False
 

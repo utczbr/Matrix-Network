@@ -42,7 +42,9 @@ The parameter values remain defined in `simulations/omnetpp.ini` and the NED dec
 | **Seed Set** | `seed-set` | `${repetition}` | - | Decision | Standard OMNeT++ | Controlled pseudo-random seed variation. |
 | **Vector Recording** | `**.vector-recording` | `false` | bool | Decision | Implementation Guide Step 5.1 | Disabled for campaign runs; enabled only in `[Config Debug]`. |
 | **Scalar Recording** | `**.scalar-recording` | `true` | bool | Decision | Implementation Guide Step 5.1 | Summary statistics, drop counters, and packet totals. |
-| **Histogram/Bin Recording**| `**.bin-recording`| `true` | bool | Decision | INET result recording | Captures histogram bins without full campaign vectors. |
+| **Histogram/Bin Recording**| `**.bin-recording`| `false` | bool | Verified | Tier A speedup | Disables histogram bin arrays; `DeadlineSink` and `export_lookup.py` use `count`, `mean`, `stddev`, and exact `recordScalar` quantiles. |
+| **Statistic Recording** | `**.statistic-recording` | `false` *(7-key whitelist `true`)* | bool | Verified | Tier A speedup | Disables INET `@statistic` listener/filter chains except the 7 verifier keys (`packets`, `generationEvents`, `gateState`, `packetSentToPeer`, `packetSentToPeerWithRetry`, `retryLimitReached`, `frameSequenceDuration`). |
+| **Packet Name Format** | `**.app[*].source.packetNameFormat` | `"pkt"` | string | Verified | Tier A speedup | Replaces `"%M-%m-%c"` to eliminate per-packet module-tree property walks; flow classification uses `udp.destPort`. |
 
 ---
 
@@ -54,6 +56,7 @@ The parameter values remain defined in `simulations/omnetpp.ini` and the NED dec
 | **AMR Fleet Sweep** | `*.numAmrs` | `5, 10, 20, 40, 80` | nodes | Decision | Q5 (approved Oct 14) | Fleet scaling range; $N = 80$ is the upper stress point (see §3.1 and the capacity analysis in §5). |
 | **Station Count** | `*.numStations` | `4` | nodes | Decision | Q5 (approved Oct 14) | Manufacturing workstations exchanging inter-station DDS and telemetry (controlled scale model). |
 | **Wired Link Bitrate** | `*.eth[*].bitrate` | `100` | Mbps | Decision | Q5 (approved Oct 14) | Fast Ethernet (100Base-TX) connecting FMS, Switch, Stations, and AP. Keeps the backbone near saturation (§3.1). |
+| **Wired Inter-Frame Gap** | `**.eth[*].phyLayer.interFrameGapInserter.duration` | `0.96us` | µs | Verified | Tier A speedup (`96b / 100Mbps`) | Constant 96-bit IFG duration at 100 Mbps replacing INET's per-frame `ancestorPar("bitrate")` lookup; cross-checked against all NED wired links by `analysis/check_parameters.py`. |
 | **IP Address Block** | `*.configurator.config` | `10.0.x.x / 16` | - | Decision | Architecture choice | Single flat L2 broadcast domain. |
 | **Disjunct Subnets** | `assignDisjunctSubnetAddresses` | `false` | bool | Decision | Architecture choice | Transparent bridging across AP and TSN switch. |
 | **Global ARP** | `GlobalArp` | `true` (default) | bool | Verified | INET `TsnNetworkBase` | Eliminates ARP request bursts and initial frame delays. |
