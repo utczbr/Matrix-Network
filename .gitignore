@@ -41,8 +41,10 @@ htmlcov/
 # (large lookup_ecdf.json, per-run simulation logs, and evidence/05_campaign/ stay ignored so campaign runs keep git_dirty=False)
 !evidence/LEDGER.md
 !evidence/DIGESTS.sha256
+!evidence/HOST_ARTIFACTS.sha256
 !evidence/00_env/
 !evidence/00_env/*
+evidence/00_env/commit.txt
 !evidence/01_build/
 !evidence/01_build/*
 !evidence/02_acceptance/

@@ -246,6 +246,7 @@ def compare_sca_directories(
     *,
     tol: float = 0.0,
     allow_subset: bool = False,
+    allow_intersection: bool = False,
 ) -> Dict[str, object]:
     """Compare all .sca(.gz) files (and exported tables when directories cover identical run sets)."""
     base_dir = Path(base_dir)
@@ -267,26 +268,38 @@ def compare_sca_directories(
 
     base_map = {_stem(p): p for p in base_files}
     opt_map = {_stem(p): p for p in opt_files}
-    if allow_subset:
-        missing_in_base = sorted(set(opt_map.keys()) - set(base_map.keys()))
-        if missing_in_base:
+    base_keys = set(base_map.keys())
+    opt_keys = set(opt_map.keys())
+    common_stems = sorted(base_keys & opt_keys)
+    if allow_intersection:
+        if not common_stems:
+            raise RuntimeError("Intersection mismatch: no matching file stems between base and opt")
+        stems_to_check = common_stems
+    elif allow_subset:
+        missing_in_base = sorted(opt_keys - base_keys)
+        missing_in_opt = sorted(base_keys - opt_keys)
+        if not common_stems or (missing_in_base and missing_in_opt):
             raise RuntimeError(
-                f"Subset mismatch: {len(missing_in_base)} file(s) in opt missing from base ({missing_in_base[:3]})"
+                f"Subset mismatch: neither directory is a subset of the other "
+                f"(only_in_base={len(missing_in_opt)} {missing_in_opt[:3]}, "
+                f"only_in_opt={len(missing_in_base)} {missing_in_base[:3]})"
             )
-    elif set(base_map.keys()) != set(opt_map.keys()):
-        missing = sorted(set(base_map.keys()) - set(opt_map.keys()))
-        extra = sorted(set(opt_map.keys()) - set(base_map.keys()))
+        stems_to_check = common_stems
+    elif base_keys != opt_keys:
+        missing = sorted(base_keys - opt_keys)
+        extra = sorted(opt_keys - base_keys)
         raise RuntimeError(
             f"Directory file stem mismatch: {len(missing)} missing in opt ({missing[:3]}), "
             f"{len(extra)} extra in opt ({extra[:3]})"
         )
+    else:
+        stems_to_check = sorted(opt_keys)
 
     total_req_scalars = 0
     total_opt_scalars = 0
     total_stat_fields = 0
     file_mismatches: Dict[str, List[str]] = {}
 
-    stems_to_check = sorted(opt_map.keys())
     for stem in stems_to_check:
         res = compare_sca_pair(base_map[stem], opt_map[stem], tol=tol)
         total_req_scalars += int(res["required_scalars_checked"])
@@ -308,7 +321,7 @@ def compare_sca_directories(
     domain_delay_rows: Optional[int] = None
     bottleneck_migration_rows: Optional[int] = None
 
-    if set(base_map.keys()) == set(opt_map.keys()):
+    if base_keys == opt_keys:
         # Compare exported tables across matched directories
         base_summary, base_ecdf = ex.build_tables_from_sca(base_dir, expected_reps=None, require_full_grid=False)
         opt_summary, opt_ecdf = ex.build_tables_from_sca(opt_dir, expected_reps=None, require_full_grid=False)
@@ -337,6 +350,7 @@ def compare_sca_directories(
     return {
         "n_files": len(stems_to_check),
         "subset_mode": allow_subset,
+        "intersection_mode": allow_intersection,
         "total_required_scalars_checked": total_req_scalars,
         "total_opt_scalars_checked": total_opt_scalars,
         "total_sink_stat_fields_checked": total_stat_fields,
@@ -354,6 +368,7 @@ def compare_manifests(
     opt_manifest: Path,
     *,
     allow_subset: bool = False,
+    allow_intersection: bool = False,
 ) -> Dict[str, object]:
     """Compute paired per-run speedup, paired RSS differences, and 10,560-run projection from two manifests."""
     df_base = pd.read_csv(base_manifest)
@@ -363,8 +378,13 @@ def compare_manifests(
 
     key_cols = ["cell", "nAmr", "phy", "telInterval", "rep", "run_number"]
     merged = pd.merge(df_base, df_opt, on=key_cols, suffixes=("_base", "_opt"))
-    if allow_subset:
-        if len(merged) == 0 or len(merged) != len(df_opt):
+    if allow_intersection:
+        if len(merged) == 0:
+            raise RuntimeError(
+                f"Intersection manifest pairing mismatch: base={len(df_base)}, opt={len(df_opt)}, paired=0"
+            )
+    elif allow_subset:
+        if len(merged) == 0 or (len(merged) != len(df_opt) and len(merged) != len(df_base)):
             raise RuntimeError(
                 f"Subset manifest pairing mismatch: base={len(df_base)}, opt={len(df_opt)}, paired={len(merged)}"
             )
@@ -559,7 +579,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     p.add_argument("--tol", type=float, default=0.0,
                    help="numeric comparison tolerance (default 0.0 for exact bit-identity)")
     p.add_argument("--allow-subset", action="store_true",
-                   help="allow --opt-dir / --opt-manifest to be a non-empty subset of --base-dir / --base-manifest (for --no-jemalloc canary checks)")
+                   help="allow one of --base-* or --opt-* to be a non-empty subset of the other (for --no-jemalloc canary or completed pilot checks)")
+    p.add_argument("--allow-intersection", action="store_true",
+                   help="compare the non-empty common intersection between --base-* and --opt-* (for partial pilot_extended vs staged campaign checks)")
     p.add_argument("--skip-whitelisted-stats", action="store_true",
                    help="do not require whitelisted @statistic :count scalars when comparing CLI-only test runs")
     p.add_argument("--out-json", type=Path, default=None,
@@ -599,10 +621,17 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         report["pairs"] = pair_results
 
     if args.base_dir and args.opt_dir:
-        dir_res = compare_sca_directories(args.base_dir, args.opt_dir, tol=args.tol, allow_subset=args.allow_subset)
+        dir_res = compare_sca_directories(
+            args.base_dir,
+            args.opt_dir,
+            tol=args.tol,
+            allow_subset=args.allow_subset,
+            allow_intersection=args.allow_intersection,
+        )
         report["directory_equivalence"] = dir_res
         print(
-            f"[PASS] Directory equivalence ({dir_res['n_files']} files, subset={dir_res['subset_mode']}): "
+            f"[PASS] Directory equivalence ({dir_res['n_files']} files, subset={dir_res['subset_mode']}, "
+            f"intersection={dir_res['intersection_mode']}): "
             f"req_scalars={dir_res['total_required_scalars_checked']}, "
             f"opt_scalars={dir_res['total_opt_scalars_checked']}, "
             f"stat_fields={dir_res['total_sink_stat_fields_checked']}, "
@@ -612,7 +641,12 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         )
 
     if args.base_manifest and args.opt_manifest:
-        perf_res = compare_manifests(args.base_manifest, args.opt_manifest, allow_subset=args.allow_subset)
+        perf_res = compare_manifests(
+            args.base_manifest,
+            args.opt_manifest,
+            allow_subset=args.allow_subset,
+            allow_intersection=args.allow_intersection,
+        )
         report["manifest_comparison"] = perf_res
         proj = perf_res["campaign_10560_projection"]
         print(

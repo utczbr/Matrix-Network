@@ -147,6 +147,88 @@ def test_compare_sca_directories_and_manifests(tmp_path):
         ve.compare_sca_directories(base_dir, opt_dir, allow_subset=True)
 
 
+def test_compare_sca_directories_base_subset_and_intersection(tmp_path):
+    base_dir = tmp_path / "pilot_extended"
+    opt_dir = tmp_path / "campaign"
+    base_dir.mkdir()
+    opt_dir.mkdir()
+
+    # Common overlap: N=80, reps 0..1 across Cells 1..2; opt adds N=40, base adds N=10
+    rows_base, rows_opt = [], []
+    for cell in (1, 2):
+        for rep in (0, 1):
+            spec80 = rc.RunSpec(cell, rep, 80, 12, "2000us", 1584 + rep)
+            _write_full_sca_for_equiv(spec80.sca_path(base_dir), spec80, include_unwhitelisted=True)
+            _write_full_sca_for_equiv(spec80.sca_path(opt_dir), spec80, include_unwhitelisted=False)
+            rows_base.append({
+                "cell": cell, "nAmr": 80, "phy": 12, "telInterval": "2000us",
+                "rep": rep, "run_number": 1584 + rep, "exit_code": 0,
+                "wall_seconds": 1200.0, "max_rss_kb": 190_000, "sca_bytes": 10_000_000,
+            })
+            rows_opt.append({
+                "cell": cell, "nAmr": 80, "phy": 12, "telInterval": "2000us",
+                "rep": rep, "run_number": 1584 + rep, "exit_code": 0,
+                "wall_seconds": 600.0, "max_rss_kb": 135_000, "sca_bytes": 4_800_000,
+            })
+
+            spec40 = rc.RunSpec(cell, rep, 40, 12, "2000us", 1200 + rep)
+            _write_full_sca_for_equiv(spec40.sca_path(opt_dir), spec40, include_unwhitelisted=False)
+            rows_opt.append({
+                "cell": cell, "nAmr": 40, "phy": 12, "telInterval": "2000us",
+                "rep": rep, "run_number": 1200 + rep, "exit_code": 0,
+                "wall_seconds": 300.0, "max_rss_kb": 110_000, "sca_bytes": 2_000_000,
+            })
+
+    bm_path = tmp_path / "base_manifest.csv"
+    om_path = tmp_path / "opt_manifest.csv"
+    pd.DataFrame(rows_base).to_csv(bm_path, index=False)
+    pd.DataFrame(rows_opt).to_csv(om_path, index=False)
+
+    # base <= opt works with allow_subset=True (P4 pilot_extended vs full campaign)
+    res_sub = ve.compare_sca_directories(base_dir, opt_dir, allow_subset=True)
+    assert res_sub["passed"] is True
+    assert res_sub["n_files"] == 4
+    perf_sub = ve.compare_manifests(bm_path, om_path, allow_subset=True)
+    assert perf_sub["n_paired_runs"] == 4
+
+    # Add N=10 to base so neither side is a subset (P3 N={40,80} vs pilot_extended {10,80})
+    spec10 = rc.RunSpec(1, 0, 10, 54, "472us", 462)
+    _write_full_sca_for_equiv(spec10.sca_path(base_dir), spec10, include_unwhitelisted=True)
+    rows_base.append({
+        "cell": 1, "nAmr": 10, "phy": 54, "telInterval": "472us",
+        "rep": 0, "run_number": 462, "exit_code": 0,
+        "wall_seconds": 480.0, "max_rss_kb": 157_000, "sca_bytes": 2_400_000,
+    })
+    pd.DataFrame(rows_base).to_csv(bm_path, index=False)
+
+    with pytest.raises(RuntimeError, match="neither directory is a subset"):
+        ve.compare_sca_directories(base_dir, opt_dir, allow_subset=True)
+    with pytest.raises(RuntimeError, match="Subset manifest pairing mismatch"):
+        ve.compare_manifests(bm_path, om_path, allow_subset=True)
+
+    # allow_intersection=True compares the 4 overlapping N=80 stems cleanly
+    out_json = tmp_path / "inter_report.json"
+    ve.main([
+        "--base-dir", str(base_dir),
+        "--opt-dir", str(opt_dir),
+        "--base-manifest", str(bm_path),
+        "--opt-manifest", str(om_path),
+        "--allow-intersection",
+        "--tol", "0.0",
+        "--out-json", str(out_json),
+    ])
+    assert out_json.exists()
+
+    # Negative control: scalar drift in overlapping run still fails under allow_intersection
+    bad = rc.RunSpec(2, 1, 80, 12, "2000us", 1585).sca_path(opt_dir)
+    bad.write_text(
+        bad.read_text(encoding="utf-8").replace("scheduledDcf_numGrantedInSlot 550", "scheduledDcf_numGrantedInSlot 551"),
+        encoding="utf-8",
+    )
+    with pytest.raises(RuntimeError, match="Raw .sca equivalence failed"):
+        ve.compare_sca_directories(base_dir, opt_dir, allow_intersection=True)
+
+
 def test_check_parameters_whitelist_order_and_wired_ifg_consistency(tmp_path):
     import check_parameters as cp
 

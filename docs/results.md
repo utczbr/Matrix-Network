@@ -45,10 +45,11 @@ No production campaign result is currently claimed. Historical pilot numbers pri
   `N=80`) while keeping `libmatrixfactory.so` (`63dd72db2c65…`) unchanged
   (deferred Tier C archived unapplied at [`docs/patches/speedup_bit_identical.patch`](patches/speedup_bit_identical.patch))
   and all `192/192` dry-run pairs (`simulations/results/dry_run_opt`,
-  `evidence/05_dry_run_opt`) and all 7 exported tables bit-for-bit identical
+  `evidence/05_dry_run_opt`) plus `12/12` `pilot_extended` overlapping `N=80` runs (`--allow-intersection`) and all 7 exported tables bit-for-bit identical
   (`0` mismatches across `688,320` required scalars, `771,744` optimized scalars,
-  and `369,264` statistic fields; digests in `evidence/DIGESTS.sha256` and
-  gate log in `evidence/LEDGER.md`).
+  and `369,264` statistic fields; clean-clone tracked digests in
+  `evidence/DIGESTS.sha256`, binary/host/ignored artifact digests in
+  `evidence/HOST_ARTIFACTS.sha256`, and gate log in `evidence/LEDGER.md`).
 
 ## Evidence available in this workspace
 

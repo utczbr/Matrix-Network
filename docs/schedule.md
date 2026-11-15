@@ -29,7 +29,7 @@ repaired instrumentation and statistical gates pass in the pinned environment.
 | PHY | 54, 12 Mbps |
 | Replications | 22 minimum, seeds 0–21 |
 
-Total at the current floor: 10,560 runs (`881.5 CPU-hours` / `9.18 wall-days` on 4 workers in the 8-load `PCHIP(N) × linear(λ)` model; `969.6`–`~1,060 CPU-hours` / `10.1–11.0 wall-days` planning budget including `+10%` top-up reserve and `N=10` hold-out superlinearity; `2.37 GiB` compressed `.sca.gz`). Per [`preregistration-campaign-v1.md`](preregistration-campaign-v1.md), P3 (`23 Nov`) runs high-`N` priority slices (`N ∈ {40, 80}`, `4,224` runs / `~6.3 wall-days`) first via `order_runs_slice_major`, then completes `N ∈ {5, 10, 20}` into P4 (`7 Dec`) without reducing `R = 22`.
+Total at the current floor: 10,560 runs (**`~1,050–1,060 CPU-hours` / `~11.0 wall-days`** central planning budget on 4 workers, combining the `881.5 CPU-hours` / `9.18 wall-days` unmargined 8-load `PCHIP(N) × linear(λ)` model with `N=10` hold-out superlinearity, `+10%` top-up reserve, and co-located canary/diag; `~2.37 GiB` compressed `.sca.gz`). Per [`preregistration-campaign-v1.md`](preregistration-campaign-v1.md), Stage P3 (`--namrs 80,40`, `4,224` runs / `605.7 CPU-h` base / `~6.3–7.0 wall-days`) completes **`~21.5–22.5 Nov`** leaving **`~1.0–1.5 days`** for Phase 6 P3 integrity audit (`audit_campaign.py`), `--allow-intersection` check on `pilot_extended`, mixture-CDF export, canary/diag, and P3 delivery (reporting collapsed CSMA slices as unresolved at `R = 22`), before taking a halted stage snapshot and completing `N ∈ {5, 10, 20}` + any symmetric `R <= 44` top-ups into P4 (`7 Dec`).
 
 ## Exit criteria
 

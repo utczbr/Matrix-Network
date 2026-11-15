@@ -18,7 +18,7 @@
   repetition/full-grid gates, and nonzero physical-drop ingestion.
 - [x] Paired-seed bottleneck migration analysis.
 - [x] Pinned Python dependency manifest.
-- [x] Bit-identical Tier A (`[General]` 7-key `@statistic` whitelist, `packetNameFormat = "pkt"`, `interFrameGapInserter.duration = 0.96us`, guarded by `check_no_production_recording_overrides()`) + Tier B (`jemalloc 5.3.0-1` enforced via `--expected-jemalloc-sha256` and `validate_manifest_consistency()`) speedup (`2.257×` total / `2.372×` mean paired across 192 dry-run runs), `verify_equivalence.py` (with `--allow-subset` canary check), unapplied Tier C archive (`docs/patches/speedup_bit_identical.patch`), and pre-registered campaign plan (`docs/preregistration-campaign-v1.md`).
+- [x] Bit-identical Tier A (`[General]` 7-key `@statistic` whitelist, `packetNameFormat = "pkt"`, `interFrameGapInserter.duration = 0.96us`, guarded by `check_no_production_recording_overrides()`) + Tier B (`jemalloc 5.3.0-1` enforced via `--expected-jemalloc-sha256` and `validate_manifest_consistency()`) speedup (`2.257×` total / `2.372×` mean paired across 192 dry-run runs), `verify_equivalence.py` (with bidirectional `--allow-subset` & `--allow-intersection`), standalone `audit_campaign.py` (Phase 6a/6c + stage snapshots), unapplied Tier C archive (`docs/patches/speedup_bit_identical.patch`), split `DIGESTS.sha256` / `HOST_ARTIFACTS.sha256`, and pre-registered campaign plan (`docs/preregistration-campaign-v1.md`).
 
 ## Must pass before P3
 
