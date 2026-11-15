@@ -371,6 +371,59 @@ def build_domain_delay_table(sca_dir: Path, tolerance_ms: float = 1e-6) -> pd.Da
         ["cell", "class", "N_AMR", "lambda_tel_Mbps", "phy_rate_Mbps", "rep", "domain"]).reset_index(drop=True)
 
 
+def mixture_cdf_quantiles(grp: pd.DataFrame, levels: Sequence[float]) -> List[float]:
+    """Invert the empirical mixture CDF weighted by delivered packets across replications.
+
+    Using exact vertical CDF mixture ``F_bar(t) = sum_r w_r F_r(t)`` (weights ``w_r = n_deliv,r / sum n_deliv``)
+    avoids barycenter smearing in bimodal collapse regimes and keeps grid summaries continuous for PCHIP.
+    """
+    lvl_arr = np.asarray(levels, dtype=np.float64)
+    q_cols = [f"ecdf_q_{lvl:.3f}" for lvl in levels]
+    q_mat = grp[q_cols].to_numpy(dtype=np.float64)
+    weights = grp["n_deliv"].to_numpy(dtype=np.float64)
+    keep = (weights > 0) & np.all(np.isfinite(q_mat), axis=1)
+    if not np.any(keep):
+        return [float("nan")] * len(levels)
+
+    q_valid = q_mat[keep]
+    w_valid = weights[keep]
+    if len(q_valid) == 1:
+        mono = np.maximum(np.maximum.accumulate(q_valid[0]), 0.0)
+        return [float(x) for x in mono]
+
+    w_norm = w_valid / float(np.sum(w_valid))
+    knots: List[Tuple[np.ndarray, np.ndarray, float]] = []
+    grid_parts: List[np.ndarray] = []
+    for row, w in zip(q_valid, w_norm):
+        mono_row = np.maximum(np.maximum.accumulate(row), 0.0)
+        du, qu = dm._cdf_knots(mono_row, lvl_arr)
+        knots.append((du, qu, float(w)))
+        grid_parts.append(du)
+        if qu[0] > 0.0 and du[0] > 0.0:
+            grid_parts.append(np.array([max(0.0, du[0] - 1e-12)], dtype=np.float64))
+
+    t_grid = np.unique(np.concatenate(grid_parts))
+    f_mix = np.zeros_like(t_grid)
+    for du, qu, w in knots:
+        f_r = np.where(t_grid < du[0], 0.0, np.interp(t_grid, du, qu, left=0.0, right=1.0))
+        f_mix += w * f_r
+    f_mix = np.clip(np.maximum.accumulate(f_mix), 0.0, 1.0)
+
+    inv = np.empty(len(lvl_arr), dtype=np.float64)
+    inv[0] = max(0.0, float(np.min(q_valid[:, 0])))
+    inv[-1] = max(0.0, float(np.max(q_valid[:, -1])))
+    for k in range(1, len(lvl_arr) - 1):
+        p = float(lvl_arr[k])
+        j = min(int(np.searchsorted(f_mix, p, side="left")), len(t_grid) - 1)
+        if j == 0 or f_mix[j] <= p + 1e-15 or f_mix[j] <= f_mix[j - 1]:
+            inv[k] = float(t_grid[j])
+        else:
+            frac = (p - f_mix[j - 1]) / (f_mix[j] - f_mix[j - 1])
+            inv[k] = float(t_grid[j - 1] + frac * (t_grid[j] - t_grid[j - 1]))
+    inv = np.maximum(np.maximum.accumulate(inv), 0.0)
+    return [float(x) for x in inv]
+
+
 def build_tables_from_sca(sca_dir: Path, strict_conservation: bool = True,
                           expected_reps: Optional[int] = None,
                           require_full_grid: bool = False) -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -527,14 +580,8 @@ def build_tables_from_sca(sca_dir: Path, strict_conservation: bool = True,
         drops = n_drop_q + n_drop_r + n_drop_o
         n_total = int(grp["n_generated"].sum())
 
-        # Weight per-run quantiles by valid deliveries when combining replications.
-        def weighted_quantile_scalar(level: float) -> float:
-            values = grp[f"ecdf_q_{level:.3f}"].to_numpy(dtype=float)
-            weights = grp["n_deliv"].to_numpy(dtype=float)
-            keep = np.isfinite(values) & (weights > 0)
-            return float(np.average(values[keep], weights=weights[keep])) if keep.any() else float("nan")
-
-        qs = [weighted_quantile_scalar(level) for level in levels]
+        # Invert unconditional empirical mixture CDF across replications (preregistration §3).
+        qs = mixture_cdf_quantiles(grp, levels)
 
         row = dict(zip(KEY, key))
         row.update(

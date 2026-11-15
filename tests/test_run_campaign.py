@@ -79,6 +79,39 @@ def write_valid_sca(path: Path, spec: rc.RunSpec) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def test_min_rep_and_cells_filters_compose_with_max_reps():
+    all_specs = synthetic_full_grid_specs(repeat=22)
+    top_up = rc.order_runs_slice_major(
+        all_specs, namrs=[80], phys=[54], tels=["2000us", "300us"], min_rep=2, max_reps=3)
+    # 2 slices x 6 cells x exactly rep 2
+    assert len(top_up) == 12
+    assert {s.rep for s in top_up} == {2}
+    assert {s.slice_key for s in top_up} == {(80, "2000us", 54), (80, "300us", 54)}
+    only_c1 = rc.order_runs_slice_major(all_specs, namrs=[80], phys=[12], tels=["2000us"], min_rep=15, cells=[1])
+    assert len(only_c1) == 22 - 15
+    assert {s.cell for s in only_c1} == {1} and min(s.rep for s in only_c1) == 15
+    # defaults leave the schedule untouched
+    assert len(rc.order_runs_slice_major(all_specs)) == 10_560
+
+
+def test_default_runner_passes_repeat_override_only_when_not_default(tmp_path, monkeypatch):
+    seen = []
+
+    def fake_wait4(cmd, log_path, timeout_sec=None):
+        seen.append(cmd[-1])
+        Path(log_path).write_text("ok\n", encoding="utf-8")
+        return 0, 1, False
+
+    monkeypatch.setattr(rc, "run_subprocess_wait4", fake_wait4)
+    spec = rc.RunSpec(1, 1740, 80, 12, "2000us", 40)
+    monkeypatch.setattr(rc, "RUN_REPEAT", 22)
+    rc.default_runner(spec, tmp_path, tmp_path / "a.log")
+    monkeypatch.setattr(rc, "RUN_REPEAT", 45)
+    rc.default_runner(spec, tmp_path, tmp_path / "b.log")
+    assert "--repeat" not in seen[0]
+    assert "'--repeat=45'" in seen[1] and "-r 1740" in seen[1]
+
+
 def synthetic_full_grid_specs(repeat: int = 22):
     specs = []
     for cell in rc.CELLS:

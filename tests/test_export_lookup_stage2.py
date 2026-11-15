@@ -251,3 +251,60 @@ def test_cli_writes_the_domain_delay_csv_only_when_asked(tmp_path):
     ex.main(base + ["--domain-delay"])
     written = pd.read_csv(out / "lookup_domain_delay.csv")
     assert len(written) == 12 and set(written["domain"]) == set(DOMAIN_MEANS)
+
+
+def test_stage2_bimodal_mixture_cdf_passes_g8a(tmp_path):
+    """Unconditional mixture-CDF aggregation reproduces bimodal CSMA collapse without G8a.6 inflation."""
+    coordinator = "MatrixFactoryNetwork.experimentCoordinator"
+    for rep in range(14):
+        path = tmp_path / f"Cell1_rep{rep}.sca"
+        collapsed = (rep == 3)
+        lines = [
+            "attr configname Cell1_Sweep",
+            "itervar nAmr 80",
+            "itervar telInterval 2000us",
+            "itervar phyRate 12Mbps",
+            f"itervar repetition {rep}",
+        ]
+        for tick in (10, 50, 500):
+            lines.append(scalar(coordinator, f"tick_phase_offset_{tick}ms_sec", 0.001))
+        for cls, sink in SINKS.items():
+            n_gen = 1000
+            n_deliv = 960 if (collapsed and cls == "state") else 1000
+            n_drop_r = 40 if (collapsed and cls == "state") else 0
+            lines.extend([
+                scalar(coordinator, f"n_generated_valid_{cls}", n_gen),
+                scalar(coordinator, f"n_delivered_valid_{cls}", n_deliv),
+                scalar(coordinator, f"n_drop_queue_{cls}", 0),
+                scalar(coordinator, f"n_drop_retry_{cls}", n_drop_r),
+                scalar(coordinator, f"n_drop_other_{cls}", 0),
+                scalar(coordinator, f"n_late_termination_{cls}", 0),
+            ])
+            q_lo, q_hi = (500.0, 900.0) if (collapsed and cls == "state") else (1.0, 9.0)
+            rep_delays = np.array([q_lo + lvl * (q_hi - q_lo) for lvl in dm.QUANTILE_LEVELS], dtype=float)
+            for level, dly in zip(dm.QUANTILE_LEVELS, rep_delays):
+                lines.append(scalar(coordinator, f"ecdf_{cls}_q_{level:.3f}", dly))
+            for name, val in {
+                "n_received_total": n_deliv,
+                "n_filtered_warmup": 0,
+                "n_filtered_horizon": 0,
+                "n_valid_delivered": n_deliv,
+                "n_domain_breakdown_valid": n_deliv,
+            }.items():
+                lines.append(scalar(sink, name, val))
+            for tick in (10, 50, 500):
+                lines.append(scalar(sink, f"tick_phase_offset_{tick}ms_sec", 0.001))
+            for deadline in dm.D_SPECTRUM_MS:
+                miss_a = int(round(n_deliv * dm.miss_a_from_quantiles(float(deadline), rep_delays, p_loss=0.0)))
+                miss_b = int(round(n_deliv * dm.miss_b_from_quantiles(float(deadline), 10.0, rep_delays, p_loss=0.0)))
+                lines.append(scalar(sink, f"n_miss_A_{deadline}ms", miss_a))
+                lines.append(scalar(sink, f"n_miss_B_{deadline}ms", miss_b))
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    summary, ecdf = ex.build_tables_from_sca(tmp_path, expected_reps=14)
+    state_row = summary[summary["class"] == "state"].iloc[0]
+    assert state_row["lat_p50"] < 10.0  # mixture median stays in normal mode (~5 ms), not smeared across gap
+    assert state_row["lat_p95"] > 500.0  # upper tail captures collapsed mode (~1/14)
+    report = ex.verify_g8a(summary, ecdf, require_full_grid=False, mc_draws=0)
+    assert report["high_miss_max_err"] <= 0.05
+    assert report["low_miss_max_err"] <= 0.015

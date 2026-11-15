@@ -95,4 +95,9 @@ agent/
 **/.codex/
 temp/
 report/*
+!report/interim_20h/
+report/interim_20h/*
+!report/interim_20h/deliverable/
+!report/interim_20h/deliverable/**
 docs/proposal.md
+docs/amendment-interim-20h.md

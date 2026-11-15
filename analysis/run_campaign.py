@@ -302,12 +302,15 @@ def order_runs_slice_major(
     phys: Optional[Iterable[int]] = None,
     tels: Optional[Iterable[str]] = None,
     max_reps: Optional[int] = None,
+    min_rep: Optional[int] = None,
+    cells: Optional[Iterable[int]] = None,
     shard: Optional[Tuple[int, int]] = None,
 ) -> List[RunSpec]:
     """Order runs slice-major (all 6 cells and all reps of a slice together), priority slices first."""
     namr_set = {int(x) for x in namrs} if namrs is not None else None
     phy_set = {int(x) for x in phys} if phys is not None else None
     tel_set = {str(x) for x in tels} if tels is not None else None
+    cell_set = {int(x) for x in cells} if cells is not None else None
 
     filtered: List[RunSpec] = []
     for s in specs:
@@ -326,6 +329,10 @@ def order_runs_slice_major(
         if tel_set is not None and s.tel_interval not in tel_set:
             continue
         if max_reps is not None and s.rep >= int(max_reps):
+            continue
+        if min_rep is not None and s.rep < int(min_rep):
+            continue
+        if cell_set is not None and s.cell not in cell_set:
             continue
         filtered.append(s)
 
@@ -702,6 +709,11 @@ def run_subprocess_wait4(
     return rc, max_rss_kb, False
 
 
+# Repetition count the schedule was enumerated with. Run numbers depend on it, so the execution command must
+# use the same value (set from --repeat in main()); 22 matches omnetpp.ini and adds no CLI override.
+RUN_REPEAT: int = 22
+
+
 def default_runner(
     spec: RunSpec,
     out_dir: Path,
@@ -713,10 +725,11 @@ def default_runner(
     """Run one OMNeT++ simulation and return (exit_code, max_rss_kb) via os.wait4."""
     time_override = f"'--sim-time-limit={sim_time_limit}' '--**.simTimeLimit={sim_time_limit}'" if sim_time_limit else ""
     preload_prefix = f"LD_PRELOAD='{jemalloc_path}' " if jemalloc_path else ""
+    repeat_override = f"'--repeat={RUN_REPEAT}' " if RUN_REPEAT != 22 else ""
     cmd = (
         f"source {OMNETPP_ENV} && export INET_ROOT={INET_ROOT} && cd {SIM_DIR} && "
         f"{preload_prefix}opp_run -n $INET_ROOT/src:../src:. -l $INET_ROOT/src/INET -l {MATRIXFACTORY_LIB} "
-        f"-u Cmdenv -c {spec.config_name} -r {spec.run_number} omnetpp.ini "
+        f"-u Cmdenv -c {spec.config_name} -r {spec.run_number} omnetpp.ini {repeat_override}"
         f"'--result-dir={out_dir.resolve()}' {time_override}"
     )
     rc, max_rss, _timed_out = run_subprocess_wait4(["bash", "-c", cmd], log_path, timeout_sec=timeout_sec)
@@ -931,6 +944,12 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                    help="repetitions per point configured in OMNeT++ (default 22)")
     p.add_argument("--max-reps", type=int, default=None,
                    help="optional cap on repetition index (e.g. 2 for quick tests)")
+    p.add_argument("--min-rep", type=int, default=None,
+                   help="optional lower bound on repetition index (runs with rep < MIN_REP are skipped); "
+                        "use to top up slices whose first reps already exist elsewhere")
+    p.add_argument("--cells", default=None,
+                   help="optional comma-separated cell filter (e.g. '1'); NOTE: a partial-cell slice is not a "
+                        "complete paired slice -- use a separate --out-dir/--evidence-dir for such runs")
     p.add_argument("--dry-run-corners", action="store_true",
                    help="run only the 96-run Phase 5b corner grid (N in {5,80}, PHY in {54,12}, load in {2000us,300us}, 6 cells, 2 reps)")
     p.add_argument("--namrs", default=None,
@@ -1005,6 +1024,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     except ValueError:  # not the main thread (tests)
         pass
     _ABORT.clear()
+    global RUN_REPEAT
+    RUN_REPEAT = int(args.repeat)
 
     all_specs: List[RunSpec] = []
     for c in CELLS:
@@ -1016,6 +1037,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     namrs = [int(x) for x in args.namrs.split(",") if x.strip()] if args.namrs else None
     phys = [int(x) for x in args.phys.split(",") if x.strip()] if args.phys else None
     tels = [x.strip() for x in args.tels.split(",") if x.strip()] if args.tels else None
+    cells = [int(x) for x in args.cells.split(",") if x.strip()] if args.cells else None
+    if args.min_rep is not None and args.max_reps is not None and args.min_rep >= args.max_reps:
+        raise RuntimeError(f"--min-rep ({args.min_rep}) must be < --max-reps ({args.max_reps})")
     scheduled = order_runs_slice_major(
         all_specs,
         dry_run_corners=args.dry_run_corners,
@@ -1023,6 +1047,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         phys=phys,
         tels=tels,
         max_reps=args.max_reps,
+        min_rep=args.min_rep,
+        cells=cells,
         shard=shard,
     )
     n_slices = len({s.slice_key for s in scheduled})
