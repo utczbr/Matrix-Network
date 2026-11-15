@@ -1,0 +1,7 @@
+{
+  "pool": "core_r3",
+  "n_files": 468,
+  "n_summary_rows": 624,
+  "passed": false,
+  "error": "G8a.6 high-miss offline error exceeded tolerance: mean=0.0053, max=0.1622"
+}

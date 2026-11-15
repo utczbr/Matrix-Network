@@ -1,0 +1,13 @@
+{
+  "sca_dir": "/home/stuart/Documentos/Learn/NetWork/Matrix/simulations/results/pools/knee_r3",
+  "total_runs": 612,
+  "n_slices": 34,
+  "min_reps_per_cell": 3,
+  "max_reps_per_cell": 3,
+  "audited_runs": 159,
+  "corner_runs": 108,
+  "sampled_non_corner_runs": 51,
+  "csma_300us_total_retries": 361,
+  "snapshot_digests_written": 0,
+  "passed": true
+}

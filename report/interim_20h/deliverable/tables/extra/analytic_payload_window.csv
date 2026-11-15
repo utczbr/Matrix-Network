@@ -1,0 +1,11 @@
+label,app_payload_B,n_eth_frames,total_wire_bytes,wire_tx_time_us_100Mbps,fits_orders_100us_window,fits_telemetry_500us_window,margin_orders_us
+dds_small,100,1,166,13.28,True,True,86.72
+state_200B,200,1,266,21.28,True,True,78.72
+orders_half,300,1,366,29.28,True,True,70.72
+orders_model_600B,600,1,666,53.28,True,True,46.72
+mid_1KB,1000,1,1066,85.28,True,True,14.72
+telemetry_model_1470B,1470,1,1536,122.88,False,True,-22.88
+eth_mtu_1500B,1500,2,1624,129.92,False,True,-29.92
+realistic_order_low_2100B,2100,2,2224,177.92,False,True,-77.92
+realistic_order_mid_5000B,5000,4,5240,419.2,False,True,-319.2
+realistic_order_high_11500B,11500,8,11972,957.76,False,False,-857.76

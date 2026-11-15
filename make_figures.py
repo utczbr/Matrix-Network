@@ -140,14 +140,55 @@ def t975(df: int) -> float:
 
 def stamp(fig, summary: Optional[pd.DataFrame], extra: str = "") -> None:
     text = ""
-    if summary is not None and "n_reps" in summary:
+    if summary is not None and "n_reps" in summary and not summary.empty:
         lo, hi = int(summary["n_reps"].min()), int(summary["n_reps"].max())
-        r = f"R = {lo}" if lo == hi else f"R = {lo}–{hi}"
-        text = f"{r} seeds per point (indicative while R < 22)."
+        if lo == hi == 3:
+            text = "R = 3 seeds per point (uniform, indicative while R < 22)."
+        else:
+            r = f"R = {lo}" if lo == hi else f"R = {lo}–{hi}"
+            text = f"{r} seeds per point (indicative while R < 22)."
     if extra:
         text = f"{text} {extra}".strip()
     if text:
         fig.text(0.995, 0.995, text, ha="right", va="top", fontsize=8, color="#666666")
+
+
+def assert_complete_grid(
+    summary: Optional[pd.DataFrame],
+    expected_loads: Optional[Sequence[float]] = None,
+) -> None:
+    """Verify uniform replication count and zero missing cells in the Cartesian summary grid."""
+    if summary is None or summary.empty:
+        raise RuntimeError("completeness gate failed: lookup_summary is empty")
+    lo, hi = int(summary["n_reps"].min()), int(summary["n_reps"].max())
+    if lo != hi or lo < 1:
+        raise RuntimeError(f"completeness gate failed: non-uniform replication count n_reps in [{lo}, {hi}]")
+    ns = sorted(int(v) for v in summary["N_AMR"].unique())
+    phys = sorted(int(v) for v in summary["phy_rate_Mbps"].unique())
+    lams = sorted(round(float(v), 3) for v in summary["lambda_tel_Mbps"].unique())
+    if len(ns) < 3 or len(phys) != 2 or len(lams) < 4:
+        raise RuntimeError(
+            f"completeness gate failed: insufficient grid dimensions N={ns}, phy={phys}, loads={lams}"
+        )
+    if expected_loads:
+        wanted = sorted(round(float(v), 3) for v in expected_loads)
+        if len(lams) != len(wanted) or not all(any(abs(a - b) <= 0.15 for a in lams) for b in wanted):
+            raise RuntimeError(f"completeness gate failed: expected loads {wanted}, got {lams}")
+    expected_keys = {
+        (c, cls, n, lam, phy)
+        for c in sorted(CELLS)
+        for cls in CLASSES
+        for n in ns
+        for lam in lams
+        for phy in phys
+    }
+    observed_keys = {
+        (int(r["cell"]), str(r["class"]), int(r["N_AMR"]), round(float(r["lambda_tel_Mbps"]), 3), int(r["phy_rate_Mbps"]))
+        for _, r in summary.iterrows()
+    }
+    missing = sorted(expected_keys - observed_keys)
+    if missing:
+        raise RuntimeError(f"completeness gate failed: {len(missing)} missing grid entries, e.g. {missing[:3]}")
 
 
 def save(fig, name: str, args) -> None:
@@ -716,6 +757,85 @@ def fig_effect_sizes(ctx) -> None:
         note += f" {omitted} smaller-effect conditions omitted."
     stamp(fig, s, note)
     save(fig, "F11_effect_sizes", ctx.args)
+    _save_f11b_unpooled(ctx, structural)
+
+
+def _save_f11b_unpooled(ctx, structural: set) -> None:
+    """Companion figure: unpooled N=80, 12 Mbps radio contrasts stratified by wired architecture."""
+    reps = ctx.reps
+    if reps is None or reps.empty:
+        return
+    sub = reps[(reps["N_AMR"] == 80) & (reps["phy_rate_Mbps"] == 12)].copy()
+    if sub.empty:
+        return
+    f11b_classes = ["orders", "dds", "state"]
+    pairs = [("FIFO (C1 − C2)", 1, 2, WIRED_COLOR["FIFO"]),
+             ("Priority (C3 − C4)", 3, 4, WIRED_COLOR["Priority"]),
+             ("TAS (C5 − C6)", 5, 6, WIRED_COLOR["TAS"])]
+    lams = sorted(sub["lambda_tel_Mbps"].unique())
+    if not lams:
+        return
+
+    rows = []
+    for cls in f11b_classes:
+        dc = sub[sub["class"] == cls].copy()
+        if dc.empty:
+            continue
+        dc["v"] = dc[f"miss_B_{NOMINAL_D[cls]}ms"] * 100.0
+        for lam in lams:
+            dl = dc[np.isclose(dc["lambda_tel_Mbps"], lam, atol=0.05)]
+            piv = dl.pivot_table(index="rep", columns="cell", values="v")
+            for pname, c_csma, c_sched, _col in pairs:
+                if c_csma not in piv.columns or c_sched not in piv.columns:
+                    continue
+                both = piv[[c_csma, c_sched]].dropna()
+                if both.empty:
+                    continue
+                diff = (both[c_csma] - both[c_sched]).to_numpy(dtype=float)
+                n = len(diff)
+                ci = t975(n - 1) * float(diff.std(ddof=1)) / np.sqrt(n) if n >= 3 else np.nan
+                rows.append({"class": cls, "lam": float(lam), "pair": pname, "mean": float(diff.mean()), "ci": ci, "n": n})
+    if not rows:
+        return
+    df_eff = pd.DataFrame(rows)
+
+    fig, axes = plt.subplots(1, 3, figsize=(15.5, 5.2), sharey=False)
+    for ax, cls in zip(axes, f11b_classes):
+        dc = df_eff[df_eff["class"] == cls]
+        present_lams = sorted(dc["lam"].unique())
+        x = np.arange(len(present_lams))
+        w = 0.25
+        for k, (pname, _ca, _cb, colour) in enumerate(pairs):
+            dp = dc[dc["pair"] == pname].set_index("lam")
+            vals = np.array([dp.loc[l, "mean"] if l in dp.index else np.nan for l in present_lams], dtype=float)
+            cis = np.array([dp.loc[l, "ci"] if l in dp.index else np.nan for l in present_lams], dtype=float)
+            fin_v = np.isfinite(vals)
+            if not fin_v.any():
+                continue
+            bars = ax.bar(x[fin_v] + (k - 1) * w, vals[fin_v], w, color=colour, label=pname)
+            fin_ci = fin_v & np.isfinite(cis)
+            if fin_ci.any():
+                ax.errorbar(x[fin_ci] + (k - 1) * w, vals[fin_ci], yerr=cis[fin_ci],
+                            fmt="none", ecolor="black", elinewidth=0.9, capsize=2.5)
+            for bar, lval in zip(bars, np.array(present_lams)[fin_v]):
+                if (cls, 80, 12, round(float(lval), 3)) in structural:
+                    bar.set_hatch("///")
+                    bar.set_edgecolor("black")
+        ax.axhline(0.0, color="black", lw=0.8)
+        ax.set_xticks(x)
+        ax.set_xticklabels([f"{fmt_lambda(l)} Mbps" for l in present_lams], fontsize=9)
+        ax.set_title(CLASS_LABEL[cls], fontsize=11, fontweight="bold")
+        ax.set_ylabel("CSMA − Scheduled miss reduction (pp)")
+        ax.grid(axis="y", alpha=0.25)
+
+    handles = [Patch(fc=col, label=lbl) for lbl, _, _, col in pairs]
+    handles.append(Patch(fc="white", ec="black", hatch="///", label="structural TDMA-wait point"))
+    fig.legend(handles=handles, loc="lower center", ncol=4, frameon=False, bbox_to_anchor=(0.5, -0.02))
+    fig.suptitle("N = 80, 12 Mbps: unpooled wireless contrasts by wired architecture",
+                 fontsize=13, fontweight="bold", x=0.01, ha="left")
+    fig.tight_layout(rect=(0, 0.06, 1, 0.94))
+    stamp(fig, ctx.summary, "Positive = Scheduled lowers miss rate vs CSMA (pp); 95% Student-t CI for R >= 3.")
+    save(fig, "F11b_effect_sizes_unpooled_N80_12M", ctx.args)
 
 
 # --------------------------------------------------------------------------- F12
@@ -802,21 +922,31 @@ def fig_surface3d(ctx) -> None:
                 r = dc[(dc["N_AMR"] == n) & np.isclose(dc["lambda_tel_Mbps"], l)]
                 if not r.empty:
                     z[i, j] = float(metric_values(r, cls, metric).iloc[0])
-        X, Y = np.meshgrid(np.arange(len(ns)), np.arange(len(lams)), indexing="ij")
         finite = np.isfinite(z)
+        if getattr(ctx.args, "require_complete", False) and not finite.all():
+            raise RuntimeError(f"F13: incomplete surface grid for cell={c}, class={cls}, phy={phy}")
         if finite.all() and len(ns) >= 3 and len(lams) >= 3:
+            nx = np.log2(np.asarray(ns, dtype=float))
+            ly = np.asarray(lams, dtype=float)
+            X, Y = np.meshgrid(nx, ly, indexing="ij")
             ax.plot_surface(X, Y, z, cmap="YlOrRd", vmin=0, vmax=zmax, edgecolor="#555555",
                             linewidth=0.4, alpha=0.95)
+            ax.set_xticks(nx)
+            ax.set_xticklabels([str(int(n)) for n in ns])
+            ax.set_yticks(ly)
+            ax.set_yticklabels([fmt_lambda(x) for x in lams], fontsize=8)
+            ax.set_xlabel("fleet size N (log2 scale)", labelpad=8)
         else:  # sparse or incomplete grid: bars only where a simulation exists
             drew_bars = True
+            X, Y = np.meshgrid(np.arange(len(ns)), np.arange(len(lams)), indexing="ij")
             zf = z[finite]
             ax.bar3d(X[finite] - 0.25, Y[finite] - 0.25, np.zeros(zf.size), 0.5, 0.5, zf,
                      color=plt.cm.YlOrRd(np.clip(zf / zmax, 0, 1)), shade=True)
-        ax.set_xticks(range(len(ns)))
-        ax.set_xticklabels(ns)
-        ax.set_yticks(range(len(lams)))
-        ax.set_yticklabels([fmt_lambda(x) for x in lams], fontsize=8)
-        ax.set_xlabel("fleet size N", labelpad=8)
+            ax.set_xticks(range(len(ns)))
+            ax.set_xticklabels(ns)
+            ax.set_yticks(range(len(lams)))
+            ax.set_yticklabels([fmt_lambda(x) for x in lams], fontsize=8)
+            ax.set_xlabel("fleet size N", labelpad=8)
         ax.set_ylabel("telemetry load (Mbps)", labelpad=10)
         ax.set_zlabel(METRIC_LABEL[metric].split(",")[0].replace("Deadline-miss rate", "miss rate") + " (%)" if metric in PERCENT_METRICS else METRIC_LABEL[metric], labelpad=8)
         ax.set_zlim(0, zmax)
@@ -826,6 +956,245 @@ def fig_surface3d(ctx) -> None:
                  fontsize=13.5, fontweight="bold", x=0.01, ha="left")
     stamp(fig, s)
     save(fig, f"F13_surface3d_{cls}_{phy}M", ctx.args)
+
+
+# --------------------------------------------------------------------------- F14..F16 (interim 20h extras)
+def _extra_dir(ctx) -> Path:
+    return Path(getattr(ctx.args, "extra_dir", "report/interim_20h/deliverable/tables/extra"))
+
+
+def fig_collapse_and_diag(ctx) -> None:
+    ed = _extra_dir(ctx)
+    per_seed = read_csv(ed, "collapse_b_per_seed.csv")
+    csum = read_csv(ed, "collapse_b_summary.csv")
+    if per_seed is None or per_seed.empty or csum is None or csum.empty:
+        raise RuntimeError("missing or empty collapse_b_per_seed.csv / collapse_b_summary.csv")
+    diag_sum = read_csv(ed, "diag_rep3_summary.csv")
+    diag_ts = read_csv(ed, "diag_rep3_timeseries.csv")
+    has_diag = diag_ts is not None and not diag_ts.empty
+
+    r50 = csum[np.isclose(csum["threshold_tau"], 0.50)]
+    if not r50.empty:
+        r0 = r50.iloc[0]
+        cp_note = (
+            f"tau=50%: {int(r0['k_exceed'])}/{int(r0['n_seeds'])} = {100*r0['p_hat']:.1f}% "
+            f"(95% CP CI [{100*r0['ci95_lo']:.1f}%, {100*r0['ci95_hi']:.1f}%])"
+        )
+    else:
+        cp_note = f"n={len(per_seed)} seeds"
+
+    if has_diag:
+        fig, axes = plt.subplots(2, 2, figsize=(15.5, 9.5))
+        ax_seed, ax_tau, ax_q, ax_mac = axes[0, 0], axes[0, 1], axes[1, 0], axes[1, 1]
+    else:
+        fig, axes = plt.subplots(1, 2, figsize=(15.0, 5.2))
+        ax_seed, ax_tau = axes[0], axes[1]
+        ax_q = ax_mac = None
+
+    reg_color = {"collapsed": "#D55E00", "intermediate": "#E69F00", "normal": "#0072B2"}
+    per_seed = per_seed.sort_values("rep")
+    for reg, lbl in (("normal", "normal (<10%)"), ("intermediate", "intermediate [10,50%)"), ("collapsed", "collapsed (>=50%)")):
+        sub = per_seed[per_seed["regime"] == reg]
+        if not sub.empty:
+            ax_seed.scatter(sub["rep"], sub["state_miss_B_50ms"] * 100.0, c=reg_color[reg], s=42, zorder=3, label=f"State: {lbl}")
+    ax_seed.plot(per_seed["rep"], per_seed["orders_miss_B_50ms"] * 100.0, color="#666666", lw=1.0, ls=":", marker="x", ms=4, label="Orders miss_B (50 ms)")
+    ax_seed.axhline(50.0, color="#D55E00", ls="--", lw=1.0, alpha=0.8)
+    ax_seed.axhline(10.0, color="#E69F00", ls=":", lw=1.0, alpha=0.8)
+    ax_seed.set_ylim(-3, 105)
+    ax_seed.set_xlabel("replication index (rep)")
+    ax_seed.set_ylabel("miss_B (%)")
+    ax_seed.set_title(f"Cell 1 (N=80, 12M, 2000us) per-seed collapse\n{cp_note}", fontsize=11, fontweight="bold")
+    ax_seed.grid(alpha=0.25)
+    ax_seed.legend(fontsize=8, loc="upper right", framealpha=0.9)
+
+    csum = csum.sort_values("threshold_tau")
+    taus = csum["threshold_tau"] * 100.0
+    phat = csum["p_hat"] * 100.0
+    lo_err = np.maximum(0.0, (csum["p_hat"] - csum["ci95_lo"]) * 100.0)
+    hi_err = np.maximum(0.0, (csum["ci95_hi"] - csum["p_hat"]) * 100.0)
+    ax_tau.errorbar(taus, phat, yerr=[lo_err, hi_err], fmt="o-", color="#D55E00", capsize=4, lw=1.8)
+    ax_tau.set_ylim(-3, 105)
+    ax_tau.set_xlabel("State miss_B threshold tau (%)")
+    ax_tau.set_ylabel("collapsed fraction (%)")
+    ax_tau.set_title("Threshold sensitivity with Clopper–Pearson 95% CI", fontsize=11, fontweight="bold")
+    ax_tau.grid(alpha=0.25)
+    if not has_diag:
+        ax_tau.text(0.5, 0.88, "diag_rep3 (Cells 1,3,5 rep=3 MAC/queue traces) pending Block B",
+                    ha="center", transform=ax_tau.transAxes, fontsize=8.5, color="#555555")
+
+    if has_diag and ax_q is not None and ax_mac is not None:
+        for cell in sorted(diag_ts["cell"].unique()):
+            dc = diag_ts[diag_ts["cell"] == cell].sort_values("bin_s")
+            kw = cell_kwargs(int(cell))
+            ax_q.plot(dc["bin_s"], dc["ap_q_mean"], color=kw["color"], ls=kw["ls"], lw=1.6, label=f"{cell_label(int(cell))} (AP mean)")
+            ax_q.plot(dc["bin_s"], dc["ap_q_max"], color=kw["color"], ls=":", lw=1.0, alpha=0.55)
+        ax_q.set_xlabel("simulation time bin (1 s, rep = 3)")
+        ax_q.set_ylabel("AP pendingQueue length (frames)")
+        ax_q.set_title("rep = 3 diagnostic: AP MAC pendingQueue trace (solid=mean, dotted=max)", fontsize=10.5, fontweight="bold")
+        ax_q.grid(alpha=0.25)
+        ax_q.legend(fontsize=8)
+
+        if diag_sum is not None and not diag_sum.empty:
+            metrics = [("ap_drop_retry", "AP retry drop"),
+                       ("amr_drop_retry", "AMR retry drop"),
+                       ("ap_drop_queue", "AP queue drop"),
+                       ("sw_drop_queue", "Switch queue drop")]
+            ds = diag_sum.sort_values("cell")
+            x = np.arange(len(metrics))
+            w = 0.25
+            for idx_c, (_, row) in enumerate(ds.iterrows()):
+                c = int(row["cell"])
+                vals = [max(0.0, float(row[m])) for m, _ in metrics]
+                bars = ax_mac.bar(x + (idx_c - 1) * w, vals, w, color=cell_kwargs(c)["color"], label=cell_label(c))
+                for bar, v in zip(bars, vals):
+                    if v > 0:
+                        ax_mac.text(bar.get_x() + bar.get_width() / 2, v, f"{int(round(v))}", ha="center", va="bottom", fontsize=7.5)
+            ax_mac.set_xticks(x)
+            ax_mac.set_xticklabels([lbl for _, lbl in metrics], fontsize=9)
+            ax_mac.set_ylabel("packet drop count (total in run)")
+            ax_mac.set_title("rep = 3 MAC & switch drop breakdown across CSMA cells", fontsize=10.5, fontweight="bold")
+            ax_mac.grid(axis="y", alpha=0.25)
+            ax_mac.legend(fontsize=8)
+
+    fig.suptitle("Cell 1 collapse incidence & rep = 3 CSMA diagnostic trace (N = 80, 12 Mbps, 2000 us)",
+                 fontsize=13, fontweight="bold", x=0.01, ha="left")
+    fig.tight_layout(rect=(0, 0.02, 1, 0.95))
+    stamp(fig, ctx.summary, "Clopper–Pearson 95% exact binomial CIs.")
+    save(fig, "F14_collapse_and_diag", ctx.args)
+
+
+def fig_conformance_map(ctx) -> None:
+    ed = _extra_dir(ctx)
+    conf = read_csv(ed, "conformance_map.csv")
+    if conf is None or conf.empty:
+        raise RuntimeError("missing or empty conformance_map.csv")
+    pools = list(conf["pool"].unique())
+    dir_name = Path(ctx.args.lookup_dir).name
+    chosen_pool = dir_name if dir_name in pools else ("core_r3" if "core_r3" in pools else pools[0])
+    d = conf[conf["pool"] == chosen_pool].copy()
+    wanted_loads = _parse_loads(getattr(ctx.args, "loads", ""))
+    if wanted_loads:
+        d = _filter_by_loads(d, wanted_loads)
+    if d.empty:
+        raise RuntimeError(f"no conformance rows for pool={chosen_pool}")
+
+    from matplotlib.colors import ListedColormap
+    state_code = {"conforms": 0, "unresolved": 1, "violates": 2}
+    cmap = ListedColormap(["#009E73", "#E69F00", "#D55E00"])
+    cmap.set_bad("#F0F0F0")
+
+    phys = sorted(d["phy_rate_Mbps"].unique(), reverse=True)
+    nl_pairs = sorted({(int(r["N_AMR"]), float(r["lambda_tel_Mbps"])) for _, r in d.iterrows()})
+    col_pairs = [(c, cls) for c in sorted(CELLS) for cls in CLASSES]
+    short_cls = {"dds": "D", "state": "S", "orders": "O", "telemetry": "T"}
+
+    fig, axes = plt.subplots(1, len(phys), figsize=(max(12, 7.5 * len(phys)), max(5.5, 0.36 * len(nl_pairs) + 2.2)), sharey=True)
+    if len(phys) == 1:
+        axes = [axes]
+    for ax, phy in zip(axes, phys):
+        dp = d[d["phy_rate_Mbps"] == phy]
+        mat = np.full((len(nl_pairs), len(col_pairs)), np.nan)
+        lookup = {(int(r["N_AMR"]), round(float(r["lambda_tel_Mbps"]), 3), int(r["cell"]), str(r["class"])): state_code.get(str(r["state"]), np.nan)
+                  for _, r in dp.iterrows()}
+        for i, (n_amr, lam) in enumerate(nl_pairs):
+            for j, (c, cls) in enumerate(col_pairs):
+                val = lookup.get((n_amr, round(lam, 3), c, cls), np.nan)
+                mat[i, j] = val
+        ax.imshow(np.ma.masked_invalid(mat), cmap=cmap, vmin=0, vmax=2, aspect="auto")
+        for xdiv in range(4, len(col_pairs), 4):
+            ax.axvline(xdiv - 0.5, color="white", lw=2.0)
+        for ydiv in range(len(nl_pairs) - 1):
+            if nl_pairs[ydiv][0] != nl_pairs[ydiv + 1][0]:
+                ax.axhline(ydiv + 0.5, color="white", lw=1.5)
+        ax.set_xticks(range(len(col_pairs)))
+        ax.set_xticklabels([short_cls[cls] for _, cls in col_pairs], fontsize=7.5)
+        for c_idx, c in enumerate(sorted(CELLS)):
+            ax.text(c_idx * 4 + 1.5, -0.85, f"C{c}", ha="center", va="bottom", fontsize=9, fontweight="bold",
+                    color=WIRED_COLOR[CELLS[c][1]])
+        ax.set_yticks(range(len(nl_pairs)))
+        ax.set_yticklabels([f"N={n}, {fmt_lambda(l)}" for n, l in nl_pairs], fontsize=8)
+        ax.set_title(f"{int(phy)} Mbps PHY", fontsize=11.5, fontweight="bold", pad=22)
+
+    handles = [
+        Patch(fc="#009E73", label="conforms (UCB95 <= 1%, prereg G8a)"),
+        Patch(fc="#E69F00", label="unresolved (95% CI straddles 1%)"),
+        Patch(fc="#D55E00", label="violates (LCB95 > 1%, addition beyond prereg)"),
+    ]
+    fig.legend(handles=handles, loc="lower center", ncol=3, frameon=False, bbox_to_anchor=(0.5, -0.02))
+    n_reps_txt = f"R={int(d['n_reps'].min())}" if int(d['n_reps'].min()) == int(d['n_reps'].max()) else f"R={int(d['n_reps'].min())}-{int(d['n_reps'].max())}"
+    fig.suptitle(f"3-state operational conformance map ({chosen_pool}, {n_reps_txt}; D/S/O/T per Cell)",
+                 fontsize=13, fontweight="bold", x=0.01, ha="left")
+    fig.tight_layout(rect=(0, 0.05, 1, 0.93))
+    stamp(fig, ctx.summary, "0-miss cells use pooled Wilson UCB (ignores within-seed burst correlation).")
+    save(fig, "F15_conformance_map", ctx.args)
+
+
+def fig_g8b_loo(ctx) -> None:
+    ed = _extra_dir(ctx)
+    loo = read_csv(ed, "g8b_loo_error.csv")
+    if loo is None or loo.empty:
+        raise RuntimeError("missing or empty g8b_loo_error.csv")
+
+    fig, axes = plt.subplots(1, 2, figsize=(15.5, 5.8))
+    groups = []
+    for (pool, mode), g in loo.groupby(["pool", "mode"], sort=True):
+        groups.append((f"{pool}\n{mode}", g))
+
+    x_base = np.arange(len(CLASSES))
+    offsets = np.linspace(-0.26, 0.26, max(1, len(groups))) if len(groups) > 1 else [0.0]
+    w = 0.22 if len(groups) > 1 else 0.4
+    mode_colors = ["#0072B2", "#D55E00", "#009E73", "#CC79A7"]
+
+    for idx_g, ((g_label, gdf), col) in enumerate(zip(groups, mode_colors)):
+        pos = x_base + offsets[idx_g]
+        w1_data = [gdf[gdf["class"] == cls]["w1_ms"].dropna().to_numpy(dtype=float) for cls in CLASSES]
+        mb_data = [(gdf[gdf["class"] == cls]["abs_err_miss_B_nom"].dropna() * 100.0).to_numpy(dtype=float) for cls in CLASSES]
+        for ax, data in ((axes[0], w1_data), (axes[1], mb_data)):
+            valid_pos = [p for p, arr in zip(pos, data) if len(arr) > 0]
+            valid_arr = [arr for arr in data if len(arr) > 0]
+            if valid_arr:
+                bp = ax.boxplot(valid_arr, positions=valid_pos, widths=w * 0.85, patch_artist=True,
+                                showfliers=False, medianprops=dict(color="black", lw=1.4))
+                for box in bp["boxes"]:
+                    box.set_facecolor(col)
+                    box.set_alpha(0.75)
+
+    from matplotlib.lines import Line2D
+
+    fin_w1 = loo["boot_r3_rmse_w1_ms"].dropna()
+    w1_med = float(fin_w1.median()) if not fin_w1.empty else float("nan")
+    if np.isfinite(w1_med):
+        axes[0].axhline(w1_med, color="#444444", ls="--", lw=1.2)
+    fin_mb = loo["boot_r3_rmse_miss_B"].dropna()
+    mb_med = float(fin_mb.median()) * 100.0 if not fin_mb.empty else float("nan")
+    if np.isfinite(mb_med):
+        axes[1].axhline(mb_med, color="#444444", ls="--", lw=1.2)
+
+    if loo["w1_ms"].max() > 15.0:
+        axes[0].set_yscale("symlog", linthresh=1.0)
+    axes[0].set_ylabel("Wasserstein-1 ECDF error (ms)")
+    w1_sub = f" (noise median {w1_med:.2f} ms)" if np.isfinite(w1_med) else ""
+    axes[0].set_title(f"Leave-One-Out ECDF error (1D W1){w1_sub}", fontsize=11, fontweight="bold")
+    axes[1].set_ylabel("|pred miss_B - emp miss_B| (pp)")
+    mb_sub = f" (noise median {mb_med:.2f} pp)" if np.isfinite(mb_med) else ""
+    axes[1].set_title(f"Leave-One-Out nominal miss_B error{mb_sub}", fontsize=11, fontweight="bold")
+    for ax in axes:
+        ax.set_xticks(x_base)
+        ax.set_xticklabels([cls.upper() for cls in CLASSES], fontsize=9.5)
+        ax.grid(axis="y", alpha=0.25)
+        y0, y1 = ax.get_ylim()
+        ax.set_ylim(y0, y1 * (1.25 if ax is axes[0] else 1.10))
+
+    handles = [Patch(fc=col, alpha=0.75, label=lbl.replace("\n", " ")) for (lbl, _), col in zip(groups, mode_colors)]
+    if np.isfinite(w1_med) or np.isfinite(mb_med):
+        handles.append(Line2D([0], [0], color="#444444", ls="--", lw=1.3, label="R=3 bootstrap median noise floor"))
+    fig.legend(handles=handles, loc="lower center", ncol=min(4, len(handles)), frameon=False, bbox_to_anchor=(0.5, -0.01))
+
+    fig.suptitle("G8b LOO PCHIP error vs R=3 noise floor",
+                 fontsize=13, fontweight="bold", x=0.01, ha="left")
+    fig.tight_layout(rect=(0, 0.06, 1, 0.93))
+    stamp(fig, ctx.summary, "Boxplots omit extreme fliers (1.5 IQR); PCHIP matches export_lookup.")
+    save(fig, "F16_g8b_interpolation_loo", ctx.args)
 
 
 # --------------------------------------------------------------------------- driver
@@ -847,7 +1216,26 @@ FIGURES = {
     "F11": ("effect_sizes", fig_effect_sizes, ("summary", "reps")),
     "F12": ("runtime_speedup", fig_runtime, ()),
     "F13": ("surface3d", fig_surface3d, ("summary",)),
+    "F14": ("collapse_and_diag", fig_collapse_and_diag, ()),
+    "F15": ("conformance_map", fig_conformance_map, ()),
+    "F16": ("g8b_interpolation_loo", fig_g8b_loo, ()),
 }
+
+
+def _parse_loads(loads_str: str) -> List[float]:
+    if not loads_str or not str(loads_str).strip():
+        return []
+    return [float(tok.strip()) for tok in str(loads_str).split(",") if tok.strip()]
+
+
+def _filter_by_loads(df: Optional[pd.DataFrame], wanted_loads: Sequence[float]) -> Optional[pd.DataFrame]:
+    if df is None or df.empty or not wanted_loads or "lambda_tel_Mbps" not in df.columns:
+        return df
+    vals = df["lambda_tel_Mbps"].to_numpy(dtype=float)
+    mask = np.zeros(len(df), dtype=bool)
+    for lval in wanted_loads:
+        mask |= np.isclose(vals, float(lval), atol=0.15)
+    return df[mask].copy()
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -855,6 +1243,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--lookup-dir", default="evidence/05_dry_run_opt/lookup",
                    help="directory with the exporter CSVs")
     p.add_argument("--out", default="figures")
+    p.add_argument("--extra-dir", default="report/interim_20h/deliverable/tables/extra",
+                   help="directory containing Stage-2+ extra CSVs (F14-F16)")
     p.add_argument("--manifest-base", default=None, help="baseline launcher manifest.csv (F12)")
     p.add_argument("--manifest-opt", default=None, help="optimized launcher manifest.csv (F12)")
     p.add_argument("--only", nargs="*", default=None, help="figure ids, e.g. F04 F08")
@@ -872,6 +1262,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--phy3d", type=int, default=None)
     p.add_argument("--surface-cells", type=int, nargs=2, default=[1, 2], metavar=("A", "B"),
                    help="two cells compared in F13 (default 1 2: CSMA vs Scheduled, FIFO)")
+    p.add_argument("--loads", default="", help="comma-separated telemetry loads (Mbps) to keep")
+    p.add_argument("--require-complete", action="store_true",
+                   help="fail with RuntimeError if the filtered grid has holes or non-uniform n_reps")
     return p
 
 
@@ -880,13 +1273,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ctx = Ctx()
     ctx.args = args
     d = Path(args.lookup_dir)
-    ctx.summary = read_csv(d, "lookup_summary.csv")
-    ctx.ecdf = read_csv(d, "lookup_ecdf.csv")
-    ctx.reps = read_csv(d, "lookup_replications.csv")
-    ctx.domain = read_csv(d, "lookup_domain_delay.csv")
-    ctx.bottleneck = read_csv(d, "bottleneck_migration.csv")
+    wanted_loads = _parse_loads(args.loads)
+    ctx.summary = _filter_by_loads(read_csv(d, "lookup_summary.csv"), wanted_loads)
+    ctx.ecdf = _filter_by_loads(read_csv(d, "lookup_ecdf.csv"), wanted_loads)
+    ctx.reps = _filter_by_loads(read_csv(d, "lookup_replications.csv"), wanted_loads)
+    ctx.domain = _filter_by_loads(read_csv(d, "lookup_domain_delay.csv"), wanted_loads)
+    ctx.bottleneck = _filter_by_loads(read_csv(d, "bottleneck_migration.csv"), wanted_loads)
     ctx.manifest_base = pd.read_csv(args.manifest_base) if args.manifest_base else None
     ctx.manifest_opt = pd.read_csv(args.manifest_opt) if args.manifest_opt else None
+
+    if args.require_complete:
+        assert_complete_grid(ctx.summary, wanted_loads)
 
     plt.rcParams.update({"font.size": 10.5, "axes.spines.top": False, "axes.spines.right": False,
                          "figure.facecolor": "white"})
