@@ -1,7 +1,7 @@
 {
   "pool": "knee_r3",
-  "n_files": 612,
-  "n_summary_rows": 816,
+  "n_files": 720,
+  "n_summary_rows": 960,
   "passed": false,
-  "error": "G8a.6 high-miss offline error exceeded tolerance: mean=0.0083, max=0.1622"
+  "error": "G8a.6 high-miss offline error exceeded tolerance: mean=0.0082, max=0.1753"
 }

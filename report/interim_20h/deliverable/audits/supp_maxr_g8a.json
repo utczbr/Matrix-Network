@@ -1,7 +1,7 @@
 {
   "pool": "supp_maxr",
-  "n_files": 1074,
-  "n_summary_rows": 1128,
+  "n_files": 1266,
+  "n_summary_rows": 1344,
   "passed": false,
-  "error": "G8a.6 high-miss offline error exceeded tolerance: mean=0.0053, max=0.1351"
+  "error": "G8a.6 high-miss offline error exceeded tolerance: mean=0.0057, max=0.1753"
 }

@@ -1,13 +1,13 @@
 {
   "sca_dir": "/home/stuart/Documentos/Learn/NetWork/Matrix/simulations/results/pools/core_r3",
-  "total_runs": 468,
-  "n_slices": 26,
+  "total_runs": 720,
+  "n_slices": 40,
   "min_reps_per_cell": 3,
   "max_reps_per_cell": 3,
-  "audited_runs": 161,
-  "corner_runs": 126,
-  "sampled_non_corner_runs": 35,
-  "csma_300us_total_retries": 177893,
+  "audited_runs": 202,
+  "corner_runs": 144,
+  "sampled_non_corner_runs": 58,
+  "csma_300us_total_retries": 178310,
   "snapshot_digests_written": 0,
   "passed": true
 }
