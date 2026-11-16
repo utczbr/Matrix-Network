@@ -1,19 +1,19 @@
-# Interim 20h Deliverable — Stage `block_B`
+# Interim 20h Deliverable — Stage `block_D`
 
-- **Generated:** 2026-11-16T07:15:43-03:00
-- **Git HEAD:** `23fa6349abefd677365c1003bc5735062ff433cb`
+- **Generated:** 2026-11-16T17:59:47-03:00
+- **Git HEAD:** `dae94c51d374c87fb60f77f9e3b4ab16506edcf1`
 - **Canary status:** pending — Option B (`--no-jemalloc` canary) scheduled for P3.
 
 ## Pool Coverage
 - `core_r3`: 40/40 slices (720/720 `.sca.gz` files)
-- `knee_r3`: 40/48 slices (720/864 `.sca.gz` files)
-- `supp_maxr`: 56 slices (1266 `.sca.gz` files)
+- `knee_r3`: 48/48 slices (864/864 `.sca.gz` files)
+- `supp_maxr`: 64 slices (1410 `.sca.gz` files)
 
 ## Audits & Equivalence
 - `core_r3_g8a.json`: `False`
 - `core_r3_phase6.json`: `True`
-- `equiv_dry_run_opt_vs_campaign.json`: `recorded`
-- `equiv_pilot_vs_campaign.json`: `recorded`
+- `equiv_dry_run_opt_vs_campaign.json`: `True`
+- `equiv_pilot_vs_campaign.json`: `True`
 - `knee_r3_g8a.json`: `False`
 - `knee_r3_phase6.json`: `True`
 - `supp_maxr_g8a.json`: `False`
@@ -26,4 +26,4 @@
 - Conformance (`core_r3`, nominal per-class): {'conforms': 681, 'violates': 256, 'unresolved': 23}
 - G8b `core_r3` `lo_N_o` (576 interior pts): median W1 = 0.005 ms, p95 W1 = 3.032 ms, median |d_miss_B| = 0.0000
 - G8b `core_r3` `lo_lambda_o` (480 interior pts): median W1 = 0.076 ms, p95 W1 = 6.655 ms, median |d_miss_B| = 0.0000
-- G8b `knee_r3` `lo_lambda_o` (672 interior pts): median W1 = 0.018 ms, p95 W1 = 3.190 ms, median |d_miss_B| = 0.0000
+- G8b `knee_r3` `lo_lambda_o` (864 interior pts): median W1 = 0.017 ms, p95 W1 = 2.771 ms, median |d_miss_B| = 0.0000
