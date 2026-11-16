@@ -1,7 +1,7 @@
-# Interim 20h Deliverable — Stage `block_C`
+# Interim 20h Deliverable — Stage `block_B`
 
-- **Generated:** 2026-11-15T22:18:26-03:00
-- **Git HEAD:** `17b2ae523dbdf3dc4ce8d0fc3520b4911b3fcfa2`
+- **Generated:** 2026-11-16T07:15:43-03:00
+- **Git HEAD:** `23fa6349abefd677365c1003bc5735062ff433cb`
 - **Canary status:** pending — Option B (`--no-jemalloc` canary) scheduled for P3.
 
 ## Pool Coverage
@@ -20,7 +20,7 @@
 - `supp_maxr_phase6.json`: `True`
 
 ## Collapse Frequency (Cell 1, N=80, 12 Mbps, 2000 us)
-- Primary rule (`state_miss_B_50ms >= 0.50`): **1/15** = 6.7% (Clopper-Pearson 95% CI: [0.2%, 31.9%]); normal (<0.10): 14, intermediate [0.10, 0.50): 0.
+- Primary rule (`state_miss_B_50ms >= 0.50`): **1/45** = 2.2% (Clopper-Pearson 95% CI: [0.1%, 11.8%]); normal (<0.10): 41, intermediate [0.10, 0.50): 3.
 
 ## Conformance & G8b Summary
 - Conformance (`core_r3`, nominal per-class): {'conforms': 681, 'violates': 256, 'unresolved': 23}
