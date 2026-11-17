@@ -2167,7 +2167,7 @@ supp_maxr,1,dds,40,110.0,12,3,65876,5,0.5140541394838686,0.4594479163974098,0.56
 supp_maxr,1,dds,40,110.0,54,3,65876,5,0.5136288387765959,0.45237210413911305,0.5748855734140789,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,1,dds,40,149.3,12,3,65871,5,0.7048462992138592,0.6885435762794797,0.7211490221482387,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,1,dds,40,149.3,54,3,65871,5,0.7035559784520045,0.6874820147538758,0.7196299421501331,violates,addition_beyond_prereg,student_t_over_replications,violates
-supp_maxr,1,dds,80,22.4,12,14,307382,5,0.0,0.0,1.2497188557751936e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
+supp_maxr,1,dds,80,22.4,12,22,483047,5,0.0,0.0,7.952493797739514e-06,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,1,dds,80,22.4,54,3,65880,5,0.0,0.0,5.8306539746853535e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,conforms
 supp_maxr,1,dds,80,74.7,12,3,65872,5,0.0,0.0,5.831362052650879e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,1,dds,80,74.7,54,3,65872,5,0.0,0.0,5.831362052650879e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,conforms
@@ -2231,7 +2231,7 @@ supp_maxr,1,orders,40,110.0,12,3,32774,50,0.0,0.0,0.0001171968210756,conforms,pr
 supp_maxr,1,orders,40,110.0,54,3,32774,50,0.0,0.0,0.0001171968210756,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,1,orders,40,149.3,12,3,32547,50,0.0,0.0,0.0001180141172557,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,1,orders,40,149.3,54,3,32547,50,0.0,0.0,0.0001180141172557,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
-supp_maxr,1,orders,80,22.4,12,14,307377,50,0.951749500704274,0.9133812958386216,0.9901177055699264,violates,addition_beyond_prereg,student_t_over_replications,violates
+supp_maxr,1,orders,80,22.4,12,22,483074,50,0.9598164024727948,0.9327833973860932,0.9868494075594963,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,1,orders,80,22.4,54,3,65877,50,0.0,0.0,5.83091948377019e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,conforms
 supp_maxr,1,orders,80,74.7,12,3,65939,50,0.9371469074059232,0.8043128832462703,1.0,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,1,orders,80,74.7,54,3,65939,50,0.0,0.0,5.8254372054819626e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,conforms
@@ -2295,7 +2295,7 @@ supp_maxr,1,state,40,110.0,12,3,65893,50,0.1805656811977743,0.1745973619585914,0
 supp_maxr,1,state,40,110.0,54,3,65893,50,0.187547289110501,0.1794503386699477,0.1956442395510543,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,1,state,40,149.3,12,3,65866,50,0.4253949694116224,0.4133593097204743,0.43743062910277053,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,1,state,40,149.3,54,3,65866,50,0.4276419968231975,0.41722589181728326,0.4380581018291117,violates,addition_beyond_prereg,student_t_over_replications,violates
-supp_maxr,1,state,80,22.4,12,14,614822,50,0.0760896734699376,0.0,0.1900870554911524,unresolved,prereg_g8a,student_t_over_replications,violates
+supp_maxr,1,state,80,22.4,12,22,966185,50,0.0602777645676265,0.0,0.1298794235603259,unresolved,prereg_g8a,student_t_over_replications,violates
 supp_maxr,1,state,80,22.4,54,3,131779,50,0.0,0.0,2.9149916469926013e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,conforms
 supp_maxr,1,state,80,74.7,12,3,131740,50,0.0209051453226352,0.0157369829904008,0.0260733076548696,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,1,state,80,74.7,54,3,131740,50,0.0,0.0,2.9158545691070148e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,conforms
@@ -2359,7 +2359,7 @@ supp_maxr,1,telemetry,40,110.0,12,3,1617329,100,0.164311948579797,0.162751010630
 supp_maxr,1,telemetry,40,110.0,54,3,1617329,100,0.1641079547905886,0.1627704970224664,0.16544541255871079,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,1,telemetry,40,149.3,12,3,2194573,100,0.3771255831462104,0.3762452293471888,0.37800593694523205,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,1,telemetry,40,149.3,54,3,2194573,100,0.3770991269241468,0.3760652530763856,0.37813300077190803,violates,addition_beyond_prereg,student_t_over_replications,violates
-supp_maxr,1,telemetry,80,22.4,12,14,1537770,100,0.0,0.0,2.4980648760742974e-06,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
+supp_maxr,1,telemetry,80,22.4,12,22,2415474,100,0.0,0.0,1.590351505097678e-06,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,1,telemetry,80,22.4,54,3,328875,100,0.0,0.0,1.168046811298172e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,conforms
 supp_maxr,1,telemetry,80,74.7,12,3,1098393,100,0.0,0.0,3.497332362675173e-06,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,1,telemetry,80,74.7,54,3,1098393,100,0.0,0.0,3.497332362675173e-06,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,conforms
@@ -2423,7 +2423,7 @@ supp_maxr,2,dds,40,110.0,12,3,65876,5,0.5135378760949053,0.4556284947564728,0.57
 supp_maxr,2,dds,40,110.0,54,3,65876,5,0.5133103317972636,0.4589776457014036,0.5676430178931235,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,2,dds,40,149.3,12,3,65871,5,0.702098677008887,0.6884729801499619,0.715724373867812,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,2,dds,40,149.3,54,3,65871,5,0.7047553531505889,0.6891246047458408,0.720386101555337,violates,addition_beyond_prereg,student_t_over_replications,violates
-supp_maxr,2,dds,80,22.4,12,14,307382,5,0.0,0.0,1.2497188557751936e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
+supp_maxr,2,dds,80,22.4,12,22,483047,5,0.0,0.0,7.952493797739514e-06,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,2,dds,80,22.4,54,3,65880,5,0.0,0.0,5.8306539746853535e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,conforms
 supp_maxr,2,dds,80,74.7,12,3,65872,5,0.0,0.0,5.831362052650879e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,2,dds,80,74.7,54,3,65872,5,0.0,0.0,5.831362052650879e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,conforms
@@ -2487,7 +2487,7 @@ supp_maxr,2,orders,40,110.0,12,3,32774,50,0.0302406524985546,0.0244167954445245,
 supp_maxr,2,orders,40,110.0,54,3,32774,50,0.0,0.0,0.0001171968210756,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,2,orders,40,149.3,12,3,32547,50,0.0359072281930943,0.019490119606185696,0.052324336780002895,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,2,orders,40,149.3,54,3,32547,50,0.0,0.0,0.0001180141172557,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
-supp_maxr,2,orders,80,22.4,12,14,307377,50,0.3202860752588011,0.3036879657401077,0.3368841847774945,violates,addition_beyond_prereg,student_t_over_replications,violates
+supp_maxr,2,orders,80,22.4,12,22,483074,50,0.3189038742028504,0.3073785904765064,0.33042915792919436,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,2,orders,80,22.4,54,3,65877,50,0.0,0.0,5.83091948377019e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,conforms
 supp_maxr,2,orders,80,74.7,12,3,65939,50,0.3228954408487525,0.28765606413887107,0.3581348175586339,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,2,orders,80,74.7,54,3,65939,50,0.0,0.0,5.8254372054819626e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,conforms
@@ -2551,7 +2551,7 @@ supp_maxr,2,state,40,110.0,12,3,65893,50,0.1836008297997403,0.1819607223627095,0
 supp_maxr,2,state,40,110.0,54,3,65893,50,0.1860892592739683,0.182970237660496,0.1892082808874406,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,2,state,40,149.3,12,3,65866,50,0.4239679486454211,0.4124474541582975,0.4354884431325447,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,2,state,40,149.3,54,3,65866,50,0.4265928734953357,0.4168844893666229,0.4363012576240485,violates,addition_beyond_prereg,student_t_over_replications,violates
-supp_maxr,2,state,80,22.4,12,14,614822,50,0.3991415481761578,0.39834000473949743,0.3999430916128182,violates,addition_beyond_prereg,student_t_over_replications,violates
+supp_maxr,2,state,80,22.4,12,22,966185,50,0.3990624312596387,0.3983812459955945,0.3997436165236829,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,2,state,80,22.4,54,3,131779,50,0.0,0.0,2.9149916469926013e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,conforms
 supp_maxr,2,state,80,74.7,12,3,131740,50,0.4032714456222989,0.39879115870135967,0.4077517325432381,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,2,state,80,74.7,54,3,131740,50,0.0,0.0,2.9158545691070148e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,conforms
@@ -2615,7 +2615,7 @@ supp_maxr,2,telemetry,40,110.0,12,3,1617329,100,0.1642977383020132,0.16279421403
 supp_maxr,2,telemetry,40,110.0,54,3,1617329,100,0.164148702836404,0.1625257369083369,0.1657716687644711,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,2,telemetry,40,149.3,12,3,2194573,100,0.3772394940691499,0.3763077105710666,0.37817127756723323,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,2,telemetry,40,149.3,54,3,2194573,100,0.3771059424384854,0.3760035193492084,0.3782083655277624,violates,addition_beyond_prereg,student_t_over_replications,violates
-supp_maxr,2,telemetry,80,22.4,12,14,1537770,100,0.0,0.0,2.4980648760742974e-06,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
+supp_maxr,2,telemetry,80,22.4,12,22,2415474,100,0.0,0.0,1.590351505097678e-06,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,2,telemetry,80,22.4,54,3,328875,100,0.0,0.0,1.168046811298172e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,conforms
 supp_maxr,2,telemetry,80,74.7,12,3,1098393,100,0.0,0.0,3.497332362675173e-06,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,2,telemetry,80,74.7,54,3,1098393,100,0.0,0.0,3.497332362675173e-06,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,conforms
@@ -2679,7 +2679,7 @@ supp_maxr,3,dds,40,110.0,12,3,65876,5,0.0,0.0,5.8310079921720726e-05,conforms,pr
 supp_maxr,3,dds,40,110.0,54,3,65876,5,0.0,0.0,5.8310079921720726e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,3,dds,40,149.3,12,3,65871,5,0.0,0.0,5.831450574489013e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,3,dds,40,149.3,54,3,65871,5,0.0,0.0,5.831450574489013e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
-supp_maxr,3,dds,80,22.4,12,14,307382,5,0.0,0.0,1.2497188557751936e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
+supp_maxr,3,dds,80,22.4,12,22,483047,5,0.0,0.0,7.952493797739514e-06,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,3,dds,80,22.4,54,3,65880,5,0.0,0.0,5.8306539746853535e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,conforms
 supp_maxr,3,dds,80,74.7,12,3,65872,5,0.0,0.0,5.831362052650879e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,3,dds,80,74.7,54,3,65872,5,0.0,0.0,5.831362052650879e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,conforms
@@ -2743,7 +2743,7 @@ supp_maxr,3,orders,40,110.0,12,3,32774,50,0.0,0.0,0.0001171968210756,conforms,pr
 supp_maxr,3,orders,40,110.0,54,3,32774,50,0.0,0.0,0.0001171968210756,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,3,orders,40,149.3,12,3,32547,50,0.0,0.0,0.0001180141172557,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,3,orders,40,149.3,54,3,32547,50,0.0,0.0,0.0001180141172557,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
-supp_maxr,3,orders,80,22.4,12,14,307377,50,0.951749500704274,0.9133812958386216,0.9901177055699264,violates,addition_beyond_prereg,student_t_over_replications,violates
+supp_maxr,3,orders,80,22.4,12,22,483074,50,0.9598164024727948,0.9327833973860932,0.9868494075594963,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,3,orders,80,22.4,54,3,65877,50,0.0,0.0,5.83091948377019e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,conforms
 supp_maxr,3,orders,80,74.7,12,3,65939,50,0.9371469074059232,0.8043128832462703,1.0,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,3,orders,80,74.7,54,3,65939,50,0.0,0.0,5.8254372054819626e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,conforms
@@ -2807,7 +2807,7 @@ supp_maxr,3,state,40,110.0,12,3,65893,50,0.0,0.0,5.829503714672992e-05,conforms,
 supp_maxr,3,state,40,110.0,54,3,65893,50,0.0,0.0,5.829503714672992e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,3,state,40,149.3,12,3,65866,50,0.0,0.0,5.831893223996384e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,3,state,40,149.3,54,3,65866,50,0.0,0.0,5.831893223996384e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
-supp_maxr,3,state,80,22.4,12,14,614822,50,0.0760864209131265,0.0,0.1900843490356368,unresolved,prereg_g8a,student_t_over_replications,violates
+supp_maxr,3,state,80,22.4,12,22,966185,50,0.0602746601725294,0.0,0.1298766174445026,unresolved,prereg_g8a,student_t_over_replications,violates
 supp_maxr,3,state,80,22.4,54,3,131779,50,0.0,0.0,2.9149916469926013e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,conforms
 supp_maxr,3,state,80,74.7,12,3,131740,50,0.0207381605449292,0.0154602743412766,0.0260160467485818,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,3,state,80,74.7,54,3,131740,50,0.0,0.0,2.9158545691070148e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,conforms
@@ -2871,7 +2871,7 @@ supp_maxr,3,telemetry,40,110.0,12,3,1617329,100,0.1713705021973076,0.16982553668
 supp_maxr,3,telemetry,40,110.0,54,3,1617329,100,0.1713735927057723,0.1698237305335715,0.1729234548779731,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,3,telemetry,40,149.3,12,3,2194573,100,0.3892695819514034,0.3881596096281776,0.39037955427462917,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,3,telemetry,40,149.3,54,3,2194573,100,0.3892695824650113,0.38816204541001353,0.3903771195200091,violates,addition_beyond_prereg,student_t_over_replications,violates
-supp_maxr,3,telemetry,80,22.4,12,14,1537770,100,0.0,0.0,2.4980648760742974e-06,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
+supp_maxr,3,telemetry,80,22.4,12,22,2415474,100,0.0,0.0,1.590351505097678e-06,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,3,telemetry,80,22.4,54,3,328875,100,0.0,0.0,1.168046811298172e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,conforms
 supp_maxr,3,telemetry,80,74.7,12,3,1098393,100,0.0002157456469925,0.0001762725258348682,0.0002552187681501318,conforms,prereg_g8a,student_t_over_replications,violates
 supp_maxr,3,telemetry,80,74.7,54,3,1098393,100,0.000290351377767,0.00017514919234410002,0.0004055535631899,conforms,prereg_g8a,student_t_over_replications,conforms
@@ -2935,7 +2935,7 @@ supp_maxr,4,dds,40,110.0,12,3,65876,5,0.0,0.0,5.8310079921720726e-05,conforms,pr
 supp_maxr,4,dds,40,110.0,54,3,65876,5,0.0,0.0,5.8310079921720726e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,4,dds,40,149.3,12,3,65871,5,0.0,0.0,5.831450574489013e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,4,dds,40,149.3,54,3,65871,5,0.0,0.0,5.831450574489013e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
-supp_maxr,4,dds,80,22.4,12,14,307382,5,0.0,0.0,1.2497188557751936e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
+supp_maxr,4,dds,80,22.4,12,22,483047,5,0.0,0.0,7.952493797739514e-06,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,4,dds,80,22.4,54,3,65880,5,0.0,0.0,5.8306539746853535e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,conforms
 supp_maxr,4,dds,80,74.7,12,3,65872,5,0.0,0.0,5.831362052650879e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,4,dds,80,74.7,54,3,65872,5,0.0,0.0,5.831362052650879e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,conforms
@@ -2999,7 +2999,7 @@ supp_maxr,4,orders,40,110.0,12,3,32774,50,0.0302406524985546,0.0244167954445245,
 supp_maxr,4,orders,40,110.0,54,3,32774,50,0.0,0.0,0.0001171968210756,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,4,orders,40,149.3,12,3,32547,50,0.0359072281930943,0.019490119606185696,0.052324336780002895,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,4,orders,40,149.3,54,3,32547,50,0.0,0.0,0.0001180141172557,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
-supp_maxr,4,orders,80,22.4,12,14,307377,50,0.3202860752588011,0.3036879657401077,0.3368841847774945,violates,addition_beyond_prereg,student_t_over_replications,violates
+supp_maxr,4,orders,80,22.4,12,22,483074,50,0.3189038742028504,0.3073785904765064,0.33042915792919436,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,4,orders,80,22.4,54,3,65877,50,0.0,0.0,5.83091948377019e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,conforms
 supp_maxr,4,orders,80,74.7,12,3,65939,50,0.3228954408487525,0.28765606413887107,0.3581348175586339,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,4,orders,80,74.7,54,3,65939,50,0.0,0.0,5.8254372054819626e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,conforms
@@ -3063,7 +3063,7 @@ supp_maxr,4,state,40,110.0,12,3,65893,50,0.0,0.0,5.829503714672992e-05,conforms,
 supp_maxr,4,state,40,110.0,54,3,65893,50,0.0,0.0,5.829503714672992e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,4,state,40,149.3,12,3,65866,50,0.0,0.0,5.831893223996384e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,4,state,40,149.3,54,3,65866,50,0.0,0.0,5.831893223996384e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
-supp_maxr,4,state,80,22.4,12,14,614822,50,0.3990764866053521,0.398269997806702,0.3998829754040022,violates,addition_beyond_prereg,student_t_over_replications,violates
+supp_maxr,4,state,80,22.4,12,22,966185,50,0.3990065407008984,0.3983223981997785,0.39969068320201834,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,4,state,80,22.4,54,3,131779,50,0.0,0.0,2.9149916469926013e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,conforms
 supp_maxr,4,state,80,74.7,12,3,131740,50,0.399597509694887,0.3947812237310855,0.4044137956586885,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,4,state,80,74.7,54,3,131740,50,0.0,0.0,2.9158545691070148e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,conforms
@@ -3127,7 +3127,7 @@ supp_maxr,4,telemetry,40,110.0,12,3,1617329,100,0.1713748269761633,0.16981370412
 supp_maxr,4,telemetry,40,110.0,54,3,1617329,100,0.171374208422697,0.169811735062843,0.17293668178255098,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,4,telemetry,40,149.3,12,3,2194573,100,0.3892663923951452,0.3881566384571843,0.39037614633310613,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,4,telemetry,40,149.3,54,3,2194573,100,0.3892677588905671,0.3881555822376328,0.39037993554350137,violates,addition_beyond_prereg,student_t_over_replications,violates
-supp_maxr,4,telemetry,80,22.4,12,14,1537770,100,0.0,0.0,2.4980648760742974e-06,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
+supp_maxr,4,telemetry,80,22.4,12,22,2415474,100,0.0,0.0,1.590351505097678e-06,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,4,telemetry,80,22.4,54,3,328875,100,0.0,0.0,1.168046811298172e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,conforms
 supp_maxr,4,telemetry,80,74.7,12,3,1098393,100,0.0003631468786861,0.00015421408827790003,0.0005720796690943,conforms,prereg_g8a,student_t_over_replications,violates
 supp_maxr,4,telemetry,80,74.7,54,3,1098393,100,0.0004560885305272,0.0003982363888542801,0.00051394067220012,conforms,prereg_g8a,student_t_over_replications,conforms
@@ -3191,7 +3191,7 @@ supp_maxr,5,dds,40,110.0,12,3,65876,5,0.0,0.0,5.8310079921720726e-05,conforms,pr
 supp_maxr,5,dds,40,110.0,54,3,65876,5,0.0,0.0,5.8310079921720726e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,5,dds,40,149.3,12,3,65871,5,0.0,0.0,5.831450574489013e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,5,dds,40,149.3,54,3,65871,5,0.0,0.0,5.831450574489013e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
-supp_maxr,5,dds,80,22.4,12,14,307382,5,0.0,0.0,1.2497188557751936e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
+supp_maxr,5,dds,80,22.4,12,22,483047,5,0.0,0.0,7.952493797739514e-06,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,5,dds,80,22.4,54,3,65880,5,0.0,0.0,5.8306539746853535e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,conforms
 supp_maxr,5,dds,80,74.7,12,3,65872,5,0.0,0.0,5.831362052650879e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,5,dds,80,74.7,54,3,65872,5,0.0,0.0,5.831362052650879e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
@@ -3255,7 +3255,7 @@ supp_maxr,5,orders,40,110.0,12,3,32774,50,0.0,0.0,0.0001171968210756,conforms,pr
 supp_maxr,5,orders,40,110.0,54,3,32774,50,0.0,0.0,0.0001171968210756,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,5,orders,40,149.3,12,3,32547,50,0.0,0.0,0.0001180141172557,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,5,orders,40,149.3,54,3,32547,50,0.0,0.0,0.0001180141172557,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
-supp_maxr,5,orders,80,22.4,12,14,307377,50,0.9222005451561373,0.8512304676028755,0.993170622709399,violates,addition_beyond_prereg,student_t_over_replications,violates
+supp_maxr,5,orders,80,22.4,12,22,483074,50,0.9399305576527474,0.8925108428745723,0.9873502724309224,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,5,orders,80,22.4,54,3,65877,50,0.0,0.0,5.83091948377019e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,conforms
 supp_maxr,5,orders,80,74.7,12,3,65939,50,0.9374099698679316,0.733613803049686,1.0,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,5,orders,80,74.7,54,3,65939,50,0.0,0.0,5.8254372054819626e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
@@ -3319,7 +3319,7 @@ supp_maxr,5,state,40,110.0,12,3,65893,50,0.0,0.0,5.829503714672992e-05,conforms,
 supp_maxr,5,state,40,110.0,54,3,65893,50,0.0,0.0,5.829503714672992e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,5,state,40,149.3,12,3,65866,50,0.0,0.0,5.831893223996384e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,5,state,40,149.3,54,3,65866,50,0.0,0.0,5.831893223996384e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
-supp_maxr,5,state,80,22.4,12,14,614822,50,0.0793273045571998,0.0,0.19990148640213812,unresolved,prereg_g8a,student_t_over_replications,violates
+supp_maxr,5,state,80,22.4,12,22,966185,50,0.0925664682501472,0.007003583733935989,0.17812935276635838,unresolved,prereg_g8a,student_t_over_replications,violates
 supp_maxr,5,state,80,22.4,54,3,131779,50,0.0,0.0,2.9149916469926013e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,conforms
 supp_maxr,5,state,80,74.7,12,3,131740,50,0.0237751194478487,0.0109845729269491,0.0365656659687483,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,5,state,80,74.7,54,3,131740,50,0.0,0.0,2.9158545691070148e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
@@ -3383,7 +3383,7 @@ supp_maxr,5,telemetry,40,110.0,12,3,1617329,100,0.5927135094439274,0.59195888835
 supp_maxr,5,telemetry,40,110.0,54,3,1617329,100,0.5927135094439274,0.5919588883543937,0.5934681305334611,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,5,telemetry,40,149.3,12,3,2194573,100,0.6998421830113554,0.6992920330454868,0.7003923329772239,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,5,telemetry,40,149.3,54,3,2194573,100,0.6998421830113554,0.6992920330454868,0.7003923329772239,violates,addition_beyond_prereg,student_t_over_replications,violates
-supp_maxr,5,telemetry,80,22.4,12,14,1537770,100,0.0,0.0,2.4980648760742974e-06,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
+supp_maxr,5,telemetry,80,22.4,12,22,2415474,100,0.0,0.0,1.590351505097678e-06,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,5,telemetry,80,22.4,54,3,328875,100,0.0,0.0,1.168046811298172e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,conforms
 supp_maxr,5,telemetry,80,74.7,12,3,1098393,100,0.4002615977729942,0.3967387546480704,0.403784440897918,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,5,telemetry,80,74.7,54,3,1098393,100,0.4002615977729942,0.3967387546480704,0.403784440897918,violates,addition_beyond_prereg,student_t_over_replications,violates
@@ -3447,7 +3447,7 @@ supp_maxr,6,dds,40,110.0,12,3,65876,5,0.0,0.0,5.8310079921720726e-05,conforms,pr
 supp_maxr,6,dds,40,110.0,54,3,65876,5,0.0,0.0,5.8310079921720726e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,6,dds,40,149.3,12,3,65871,5,0.0,0.0,5.831450574489013e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,6,dds,40,149.3,54,3,65871,5,0.0,0.0,5.831450574489013e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
-supp_maxr,6,dds,80,22.4,12,14,307382,5,0.0,0.0,1.2497188557751936e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
+supp_maxr,6,dds,80,22.4,12,22,483047,5,0.0,0.0,7.952493797739514e-06,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,6,dds,80,22.4,54,3,65880,5,0.0,0.0,5.8306539746853535e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,conforms
 supp_maxr,6,dds,80,74.7,12,3,65872,5,0.0,0.0,5.831362052650879e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,6,dds,80,74.7,54,3,65872,5,0.0,0.0,5.831362052650879e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
@@ -3511,7 +3511,7 @@ supp_maxr,6,orders,40,110.0,12,3,32774,50,0.0352649022135454,0.02994914493665439
 supp_maxr,6,orders,40,110.0,54,3,32774,50,0.0,0.0,0.0001171968210756,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,6,orders,40,149.3,12,3,32547,50,0.0408189588849299,0.025067495107142703,0.0565704226627171,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,6,orders,40,149.3,54,3,32547,50,0.0,0.0,0.0001180141172557,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
-supp_maxr,6,orders,80,22.4,12,14,307377,50,0.3261440999890812,0.30964895906784534,0.3426392409103171,violates,addition_beyond_prereg,student_t_over_replications,violates
+supp_maxr,6,orders,80,22.4,12,22,483074,50,0.3248393257428904,0.3133641009972444,0.33631455048853637,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,6,orders,80,22.4,54,3,65877,50,0.0,0.0,5.83091948377019e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,conforms
 supp_maxr,6,orders,80,74.7,12,3,65939,50,0.3278285685196954,0.29682892250778037,0.3588282145316104,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,6,orders,80,74.7,54,3,65939,50,0.0,0.0,5.8254372054819626e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
@@ -3575,7 +3575,7 @@ supp_maxr,6,state,40,110.0,12,3,65893,50,0.0,0.0,5.829503714672992e-05,conforms,
 supp_maxr,6,state,40,110.0,54,3,65893,50,0.0,0.0,5.829503714672992e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,6,state,40,149.3,12,3,65866,50,0.0,0.0,5.831893223996384e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,6,state,40,149.3,54,3,65866,50,0.0,0.0,5.831893223996384e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
-supp_maxr,6,state,80,22.4,12,14,614822,50,0.4047089762636804,0.4030658208745726,0.4063521316527882,violates,addition_beyond_prereg,student_t_over_replications,violates
+supp_maxr,6,state,80,22.4,12,22,966185,50,0.4051201382115271,0.40383241539463127,0.4064078610284229,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,6,state,80,22.4,54,3,131779,50,0.0,0.0,2.9149916469926013e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,conforms
 supp_maxr,6,state,80,74.7,12,3,131740,50,0.4028160948157812,0.4006804024776367,0.40495178715392566,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,6,state,80,74.7,54,3,131740,50,0.0,0.0,2.9158545691070148e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
@@ -3639,7 +3639,7 @@ supp_maxr,6,telemetry,40,110.0,12,3,1617329,100,0.5927135094439274,0.59195888835
 supp_maxr,6,telemetry,40,110.0,54,3,1617329,100,0.5927135094439274,0.5919588883543937,0.5934681305334611,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,6,telemetry,40,149.3,12,3,2194573,100,0.6998421830113554,0.6992920330454868,0.7003923329772239,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,6,telemetry,40,149.3,54,3,2194573,100,0.6998421830113554,0.6992920330454868,0.7003923329772239,violates,addition_beyond_prereg,student_t_over_replications,violates
-supp_maxr,6,telemetry,80,22.4,12,14,1537770,100,0.0,0.0,2.4980648760742974e-06,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
+supp_maxr,6,telemetry,80,22.4,12,22,2415474,100,0.0,0.0,1.590351505097678e-06,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,violates
 supp_maxr,6,telemetry,80,22.4,54,3,328875,100,0.0,0.0,1.168046811298172e-05,conforms,prereg_g8a,pooled_wilson_ignores_within_seed_burst_correlation,conforms
 supp_maxr,6,telemetry,80,74.7,12,3,1098393,100,0.4002615977729942,0.3967387546480704,0.403784440897918,violates,addition_beyond_prereg,student_t_over_replications,violates
 supp_maxr,6,telemetry,80,74.7,54,3,1098393,100,0.4002615977729942,0.3967387546480704,0.403784440897918,violates,addition_beyond_prereg,student_t_over_replications,violates

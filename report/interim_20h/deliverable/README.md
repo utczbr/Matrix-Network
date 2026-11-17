@@ -1,15 +1,17 @@
-# Interim 20h Deliverable — Stage `block_D`
+# Interim 20h Deliverable — Stage `p3_canary_passed`
 
-- **Generated:** 2026-11-16T17:59:47-03:00
-- **Git HEAD:** `dae94c51d374c87fb60f77f9e3b4ab16506edcf1`
-- **Canary status:** pending — Option B (`--no-jemalloc` canary) scheduled for P3.
+- **Generated:** 2026-11-17T16:46:15-03:00
+- **Git HEAD:** `2b3d6266428269f97392807bd95e2eaa26df6dff`
+- **Canary status:** PASS — Option B `--no-jemalloc` (45 files, 0 mismatches, tol=0.0).
 
 ## Pool Coverage
 - `core_r3`: 40/40 slices (720/720 `.sca.gz` files)
 - `knee_r3`: 48/48 slices (864/864 `.sca.gz` files)
-- `supp_maxr`: 64 slices (1410 `.sca.gz` files)
+- `supp_maxr`: 64 slices (1458 `.sca.gz` files)
 
 ## Audits & Equivalence
+- `canary_nojemalloc_equiv.json`: `True`
+- `canary_vs_pilot_equiv.json`: `True`
 - `core_r3_g8a.json`: `False`
 - `core_r3_phase6.json`: `True`
 - `equiv_dry_run_opt_vs_campaign.json`: `True`
