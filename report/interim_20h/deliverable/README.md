@@ -1,13 +1,13 @@
-# Interim 20h Deliverable — Stage `p3_partial_30h`
+# Interim 20h Deliverable — Stage `p3_complete`
 
-- **Generated:** 2026-11-17T21:41:13-03:00
-- **Git HEAD:** `b2cfdb7858b36d415b5e53f518a9bfcd7452a77a`
+- **Generated:** 2026-11-22T09:17:49-03:00
+- **Git HEAD:** `786468c6e543cd0c84ea5ef50f60379ab97628c0`
 - **Canary status:** PASS — Option B `--no-jemalloc` (45 files, 0 mismatches, tol=0.0).
 
 ## Pool Coverage
 - `core_r3`: 40/40 slices (720/720 `.sca.gz` files)
 - `knee_r3`: 48/48 slices (864/864 `.sca.gz` files)
-- `supp_maxr`: 64 slices (1572 `.sca.gz` files)
+- `supp_maxr`: 72 slices (5112 `.sca.gz` files)
 
 ## Audits & Equivalence
 - `canary_nojemalloc_equiv.json`: `True`
@@ -18,6 +18,8 @@
 - `equiv_pilot_vs_campaign.json`: `True`
 - `knee_r3_g8a.json`: `False`
 - `knee_r3_phase6.json`: `True`
+- `p3_g8a.json`: `False`
+- `p3_phase6_audit.json`: `True`
 - `supp_maxr_g8a.json`: `False`
 - `supp_maxr_phase6.json`: `True`
 
