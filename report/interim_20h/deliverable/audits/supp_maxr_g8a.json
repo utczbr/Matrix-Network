@@ -1,7 +1,7 @@
 {
   "pool": "supp_maxr",
-  "n_files": 5112,
-  "n_summary_rows": 1728,
+  "n_files": 5256,
+  "n_summary_rows": 1920,
   "passed": false,
-  "error": "G8a.6 high-miss offline error exceeded tolerance: mean=0.0048, max=0.1753"
+  "error": "G8a.4 grid node reproduction failed at (1, 'state', 80, 22.4, 12)"
 }
