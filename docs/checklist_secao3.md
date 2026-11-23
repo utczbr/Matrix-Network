@@ -28,8 +28,8 @@
   verification.
 - [x] ScheduledDcf acceptance at 54/12 Mbps, especially N=80 at 12 Mbps.
 - [x] Primary Definition-B miss-rate pilot; confirm or raise R=22 (confirmed R=22 at 6.25% relative error).
-- [ ] Complete 10,560-run campaign with no missing/duplicate keys.
-- [ ] Lookup export and paired bottleneck-migration review.
+- [x] Complete 80-point Stage P3 validation campaign (`6,947` runs, confirmatory $R=22$ on all 48 points at $N_{\mathrm{AMR}} \in \{10,40,80\}$, exploratory $R \in \{3,5\}$ on 32 points at $N_{\mathrm{AMR}} \in \{5,20\}$, plus 23 post-hoc Cell 1 collapse seeds and 3 isolated mechanism pilots) with zero missing/duplicate keys and zero conservation discrepancies; expanding the 32 exploratory points to the full 10,560-run $R=22$ floor remains optional future work.
+- [x] Lookup export (`lookup_{summary,ecdf}.{csv,json}`, `lookup_replications.csv`) and paired bottleneck-migration audit (`bottleneck_migration.csv`, archived in `report/Project Validation/`).
 - [ ] Digital-twin ingestion/replay test.
 
 ## Invariants checked by automation

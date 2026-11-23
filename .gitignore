@@ -99,5 +99,56 @@ report/*
 report/interim_20h/*
 !report/interim_20h/deliverable/
 !report/interim_20h/deliverable/**
+!report/Project Validation/
+report/Project Validation/*
+!report/Project Validation/main.tex
+!report/Project Validation/main.pdf
+!report/Project Validation/references.bib
+!report/Project Validation/Makefile
+!report/Project Validation/REVISION_NOTES.md
+!report/Project Validation/DRAFT_OUTLINE_AND_ANALYSIS.md
+!report/Project Validation/tool/
+report/Project Validation/tool/*
+!report/Project Validation/tool/*.py
+!report/Project Validation/images/
+report/Project Validation/images/*
+!report/Project Validation/images/pdf/
+report/Project Validation/images/pdf/*
+!report/Project Validation/images/pdf/*.pdf
+!report/Project Validation/tables/
+report/Project Validation/tables/*
+!report/Project Validation/tables/pool_status.json
+!report/Project Validation/tables/*_manifest.csv
+!report/Project Validation/tables/core_r3/
+report/Project Validation/tables/core_r3/*
+!report/Project Validation/tables/core_r3/*.csv
+!report/Project Validation/tables/knee_r3/
+report/Project Validation/tables/knee_r3/*
+!report/Project Validation/tables/knee_r3/*.csv
+!report/Project Validation/tables/supp_maxr/
+report/Project Validation/tables/supp_maxr/*
+!report/Project Validation/tables/supp_maxr/*.csv
+!report/Project Validation/tables/extra/
+report/Project Validation/tables/extra/*
+!report/Project Validation/tables/extra/*.csv
+report/Project Validation/tables/extra/run_metrics_full.csv
+!report/Project Validation/pilot_codesign/
+report/Project Validation/pilot_codesign/*
+!report/Project Validation/pilot_codesign/*.ini
+!report/Project Validation/pilot_codesign/*.py
+!report/Project Validation/pilot_codesign/*.sh
+!report/Project Validation/pilot_codesign/*.csv
+!report/Project Validation/pilot_gcl/
+report/Project Validation/pilot_gcl/*
+!report/Project Validation/pilot_gcl/*.ini
+!report/Project Validation/pilot_gcl/*.py
+!report/Project Validation/pilot_gcl/*.sh
+!report/Project Validation/pilot_gcl/*.csv
+!report/Project Validation/pilot_bufparity/
+report/Project Validation/pilot_bufparity/*
+!report/Project Validation/pilot_bufparity/*.ini
+!report/Project Validation/pilot_bufparity/*.py
+!report/Project Validation/pilot_bufparity/*.sh
+!report/Project Validation/pilot_bufparity/*.csv
 docs/proposal.md
 docs/amendment-interim-20h.md

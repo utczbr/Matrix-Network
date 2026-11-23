@@ -1,10 +1,10 @@
 # Validation and Results Status
 
-**Revision:** November 14, 2026 (`libmatrixfactory.so` SHA-256 `63dd72db2c65…`, updated after `ScheduledDcf::hasFrameToTransmit()` fix and Tier A+B bit-identical speedup gate)
+**Revision:** November 23, 2026 (`libmatrixfactory.so` at campaign commit `8730cbe`; validation report and synchronized tables archived in `report/Project Validation/`)
 
-Implementation responsibilities are mapped in the corresponding `docs/SPEC-*.md` files. Pre-production acceptance suites and the statistical pilot campaign are validated and recorded below; full-scale production results (the 10,560-run sweep) remain pending campaign execution.
+Implementation responsibilities are mapped in the corresponding `docs/SPEC-*.md` files. Pre-production acceptance suites, the statistical pilot campaign, and the 80-point Stage P3 validation campaign (`6,947` main-campaign runs across `27,788` `(run, class)` series and `3,106,282,724` valid packets with `0` conservation errors, plus 3 isolated mechanism pilots in `report/Project Validation/pilot_{codesign,gcl,bufparity}/`) are complete and recorded below and in [the validation report](file:///home/stuart/Documentos/Learn/NetWork/Matrix/report/Project%20Validation/main.pdf).
 
-No production campaign result is currently claimed. Historical pilot numbers prior to October 15, 2026 were superseded because the earlier scalar exporter substituted zero for physical drop counts, the retry verifier matched byte sums to packet counts, and the scheduled 12 Mbps allocation was underprovisioned. The repaired acceptance and pilot results reported below reflect the corrected, verified toolchain and accounting rules.
+Design coverage comprises confirmatory $R=22$ replications across all 48 operating points at $N_{\mathrm{AMR}} \in \{10, 40, 80\}$, exploratory $R \in \{3, 5\}$ replications across the 32 points at $N_{\mathrm{AMR}} \in \{5, 20\}$, and 23 post-hoc Cell 1 collapse seeds; expanding those 32 exploratory points to the full 10,560-run $R=22$ production floor remains future work. Historical pilot numbers prior to October 15, 2026 were superseded because the earlier scalar exporter substituted zero for physical drop counts, the retry verifier matched byte sums to packet counts, and the scheduled 12 Mbps allocation was underprovisioned. The repaired acceptance and pilot results reported below reflect the corrected, verified toolchain and accounting rules.
 
 ## Implemented repairs
 

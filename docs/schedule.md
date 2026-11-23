@@ -1,9 +1,8 @@
 # Campaign schedule and gates
 
-**Revision:** November 14, 2026
+**Revision:** November 23, 2026
 
-The former “ready for P3” status is withdrawn. Production starts only after the
-repaired instrumentation and statistical gates pass in the pinned environment.
+All pre-production gates passed in the pinned environment, and the 80-point Stage P3 validation campaign (`6,947` main-campaign runs + 3 isolated verification pilots) has been executed, audited for exact 5-outcome packet conservation, and synthesized in `report/Project Validation/main.pdf`. Expanding the 32 exploratory operating points ($N_{\mathrm{AMR}} \in \{5, 20\}$) to the full 10,560-run $R=22$ floor and executing downstream Digital Twin replay remain the remaining Phase 4 activities.
 
 ## Dependency sequence
 

@@ -1,0 +1,4 @@
+cell,source_file,ap_sent_without_retry,ap_sent_with_retry,ap_drop_retry,ap_drop_queue,amr_sent_without_retry,amr_sent_with_retry,amr_drop_retry,amr_drop_queue,sw_drop_queue,state_miss_B_50ms,orders_miss_B_50ms,dds_miss_B_5ms,telemetry_miss_B_100ms
+1,"Cell1_Sweep-nAmr=80,nSta=4,phyRate=12Mbps,telInterval=2000us-#3.sca.gz",45570.0,1222.0,0.0,15450.0,47206.0,57632.0,1499.0,218.0,0.0,0.7613289611513413,1.0,0.0,0.0
+3,"Cell3_Sweep-nAmr=80,nSta=4,phyRate=12Mbps,telInterval=2000us-#3.sca.gz",45570.0,1222.0,0.0,15450.0,47206.0,57632.0,1499.0,218.0,0.0,0.7613289611513413,1.0,0.0,0.0
+5,"Cell5_Sweep-nAmr=80,nSta=4,phyRate=12Mbps,telInterval=2000us-#3.sca.gz",45218.0,1208.0,0.0,15659.0,46963.0,58665.0,1631.0,346.0,0.0,0.8040715944801202,1.0,0.0,0.0
