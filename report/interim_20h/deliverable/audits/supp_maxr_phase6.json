@@ -1,13 +1,13 @@
 {
   "sca_dir": "/home/stuart/Documentos/Learn/NetWork/Matrix/simulations/results/pools/supp_maxr",
-  "total_runs": 9168,
+  "total_runs": 9648,
   "n_slices": 80,
   "min_reps_per_cell": 3,
   "max_reps_per_cell": 22,
-  "audited_runs": 1554,
-  "corner_runs": 708,
-  "sampled_non_corner_runs": 846,
-  "csma_300us_total_retries": 1484823,
+  "audited_runs": 1710,
+  "corner_runs": 828,
+  "sampled_non_corner_runs": 882,
+  "csma_300us_total_retries": 1485944,
   "snapshot_digests_written": 0,
   "passed": true
 }
