@@ -1,13 +1,13 @@
-# Interim 20h Deliverable — Stage `p4_n5_12m_r22`
+# Interim 20h Deliverable — Stage `p4_n5_54m_r12`
 
-- **Generated:** 2026-11-25T20:04:50-03:00
-- **Git HEAD:** `c703beb3b3eea1dcaf3dfd5868d2bd4821225a68`
+- **Generated:** 2026-11-26T00:38:28-03:00
+- **Git HEAD:** `2ca68bbdffa629de9fc20b058ea40d7d0bb8e061`
 - **Canary status:** PASS — Option B `--no-jemalloc` (45 files, 0 mismatches, tol=0.0).
 
 ## Pool Coverage
 - `core_r3`: 40/40 slices (720/720 `.sca.gz` files)
 - `knee_r3`: 48/48 slices (864/864 `.sca.gz` files)
-- `supp_maxr`: 80 slices (9648 `.sca.gz` files)
+- `supp_maxr`: 80 slices (10080 `.sca.gz` files)
 
 ## Audits & Equivalence
 - `canary_nojemalloc_equiv.json`: `True`
